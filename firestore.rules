@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed(){return request.auth != null;}
+  function admin(){return signed() && request.auth.token.firebase.sign_in_provider == 'google.com' && request.auth.token.email_verified == true && get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.active == true;}
+  function superAdmin(){return admin() && get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.role == 'SUPER_ADMIN';}
+  function binding(){return get(/databases/$(database)/documents/bindings/$(request.auth.uid)).data;}
+  function student(pid,sid){return signed() && binding().project_id == pid && binding().participant_id == sid && get(/databases/$(database)/documents/projects/$(pid)/participants/$(sid)).data.active == true && binding().tokenVersion == get(/databases/$(database)/documents/projects/$(pid)/participants/$(sid)).data.tokenVersion && get(/databases/$(database)/documents/projects/$(pid)).data.archived == false;}
+  match /admins/{email}{allow get: if admin() || (signed() && request.auth.token.email == email);allow list: if superAdmin();allow create,update: if superAdmin() && email != request.auth.token.email && request.resource.data.role == 'ADMIN' && request.resource.data.active is bool;allow delete: if false;}
+  match /access/{hash}{allow get: if signed();allow list: if false;allow create,update,delete: if admin();}
+  match /bindings/{uid}{
+   allow get: if signed() && request.auth.uid==uid;
+   allow list,delete: if false;
+   allow create,update: if signed() && request.auth.uid==uid && request.auth.token.firebase.sign_in_provider=='anonymous'
+    && request.resource.data.keys().hasOnly(['project_id','participant_id','tokenVersion','codeHash'])
+    && request.resource.data.codeHash.matches('[a-f0-9]{64}')
+    && get(/databases/$(database)/documents/access/$(request.resource.data.codeHash)).data.project_id==request.resource.data.project_id
+    && get(/databases/$(database)/documents/access/$(request.resource.data.codeHash)).data.participant_id==request.resource.data.participant_id
+    && get(/databases/$(database)/documents/access/$(request.resource.data.codeHash)).data.tokenVersion==request.resource.data.tokenVersion;
+  }
+  match /projects/{pid}{
+   allow get: if admin() || student(pid,binding().participant_id);
+   allow list,create,update: if admin();allow delete: if false;
+   match /participants/{sid}{allow get: if admin() || student(pid,sid);allow list,create,update: if admin();allow delete: if false;}
+   match /private_roster/{sid}{allow read,create,update: if admin();allow delete: if false;}
+   match /records/{rid}{
+    function surveyValid(d){let r=d.data.raw;return d.data.keys().hasOnly(['raw','derived']) && r is map && r.keys().hasOnly(['A1','A2','A3','A4','A5','A6','B1','B2','B3','B4','B5','B6','C1','C2','C3','C4','C5','C6','D1','D2','D3','D4','D5','E1','E2','E3','E4','E5']) && (d.status=='draft'||r.keys().hasAll(['A1','A2','A3','A4','A5','A6','B1','B2','B3','B4','B5','B6','C1','C2','C3','C4','C5','C6','D1','D2','D3','D4','D5','E1','E2','E3','E4','E5'])) && r.values().hasOnly([1,2,3,4,5]);}
+    function textValue(v){return v is string && v.size()<=20000;}
+    function dataValid(d){return (d.kind=='survey' && surveyValid(d)) || (d.kind=='journal' && d.data.keys().hasOnly(['question','learned','doubt','check','no_doubt','struggle','challenge','mood','next','auto']) && textValue(d.data.question) && textValue(d.data.learned) && textValue(d.data.doubt) && textValue(d.data.check) && textValue(d.data.struggle) && textValue(d.data.mood) && textValue(d.data.next) && (d.status=='draft'||(d.data.no_doubt is bool && d.data.challenge is int && d.data.challenge>=1 && d.data.challenge<=5 && d.data.question.size()>0 && d.data.learned.size()>0 && d.data.struggle.size()>0 && d.data.next.size()>0 && d.data.mood.size()>0 && (d.data.no_doubt || (d.data.doubt.size()>0 && d.data.check.size()>0))))) || (d.kind=='prompt' && d.data.keys().hasOnly(['tool','raw','turns','note','rubricDraft']) && d.data.raw is string && d.data.raw.size()<=180000 && d.data.turns is list && d.data.turns.size()<=500 && textValue(d.data.note) && (d.status=='draft'||(d.data.raw.size()>0 && d.data.turns.size()>0 && d.data.tool in ['ChatGPT','Gemini','Claude','뤼튼','기타'])));}
+    function payload(){let d=request.resource.data;return d.keys().hasOnly(['project_id','participant_id','kind','unit','session_id','phase','data','status','instrumentVersion','revision','createdAt','updatedAt','submittedAt']) && d.project_id==pid && rid==d.participant_id+'_'+d.kind+'_'+d.unit && d.kind in ['survey','journal','prompt'] && d.status in ['draft','submitted'] && d.instrumentVersion=='ai-on-report-2026-v1' && d.data is map && dataValid(d) && d.updatedAt==request.time && ((d.status=='draft' && d.submittedAt==null)||(d.status=='submitted' && d.submittedAt==request.time)) && ((d.kind=='survey' && d.phase in ['PRE','POST','DELAYED'] && d.unit==d.phase && d.session_id==null && get(/databases/$(database)/documents/projects/$(pid)).data.enabled[d.phase]) || (d.kind!='survey' && d.phase==null && d.session_id is int && d.session_id>=1 && d.session_id<=get(/databases/$(database)/documents/projects/$(pid)).data.sessionCount && d.unit==string(d.session_id) && get(/databases/$(database)/documents/projects/$(pid)).data.enabled[d.kind]));}
+    function history(){return getAfter(/databases/$(database)/documents/projects/$(pid)/records/$(rid)/revisions/$(string(resource.data.revision))).data.before==resource.data;}
+    allow get,list: if admin() || student(pid,resource.data.participant_id);
+    allow create: if student(pid,request.resource.data.participant_id) && payload() && request.resource.data.revision==1 && request.resource.data.createdAt==request.time;
+    allow update: if (student(pid,resource.data.participant_id) && resource.data.status=='draft' && request.resource.data.participant_id==resource.data.participant_id && payload() && request.resource.data.createdAt==resource.data.createdAt && request.resource.data.revision==resource.data.revision+1 && history()) || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','revision','updatedAt','submittedAt']) && request.resource.data.status=='draft' && request.resource.data.submittedAt==null && request.resource.data.updatedAt==request.time && request.resource.data.revision==resource.data.revision+1 && history());
+    allow delete: if false;
+    match /revisions/{rev}{
+     allow read: if admin();
+     allow create: if (admin() || student(pid,get(/databases/$(database)/documents/projects/$(pid)/records/$(rid)).data.participant_id)) && request.resource.data.keys().hasOnly(['before','changedBy','changedAt','reason']) && request.resource.data.before==get(/databases/$(database)/documents/projects/$(pid)/records/$(rid)).data && rev==string(request.resource.data.before.revision) && request.resource.data.changedBy==request.auth.uid && request.resource.data.changedAt==request.time;
+     allow update,delete: if false;
+    }
+   }
+   match /teacher_codings/{rid}{
+    allow read: if admin();
+    allow create: if admin() && request.resource.data.revision==1 && request.resource.data.updatedBy==request.auth.uid && request.resource.data.updatedAt==request.time;
+    allow update: if admin() && request.resource.data.revision==resource.data.revision+1 && request.resource.data.updatedBy==request.auth.uid && request.resource.data.updatedAt==request.time && getAfter(/databases/$(database)/documents/projects/$(pid)/teacher_codings/$(rid)/revisions/$(string(resource.data.revision))).data.before==resource.data;
+    allow delete: if false;
+    match /revisions/{rev}{allow read: if admin();allow create: if admin() && request.resource.data.before==get(/databases/$(database)/documents/projects/$(pid)/teacher_codings/$(rid)).data && rev==string(request.resource.data.before.revision) && request.resource.data.changedBy==request.auth.uid && request.resource.data.changedAt==request.time;allow update,delete: if false;}
+   }
+   match /validity_reviews/{id}{allow read,create,update: if admin();allow delete: if false;}
+  }
+ }
+}

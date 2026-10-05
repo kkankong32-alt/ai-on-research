@@ -1,0 +1,28 @@
+{
+  "name": "ai-on-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test": "node --test tests/domain.test.js",
+    "test:rules": "firebase emulators:exec --project demo-ai-on --only firestore \"node --test tests/rules.test.js\"",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "firebase": "^12.0.0",
+    "lucide-react": "^0.468.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "firebase-tools": "^14.0.0",
+    "prettier": "^3.9.9",
+    "vite": "^6.1.0"
+  }
+}
