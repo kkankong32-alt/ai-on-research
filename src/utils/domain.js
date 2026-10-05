@@ -154,6 +154,14 @@ export function validateRecord(kind, data, submit) {
     return "대화가 너무 길어요. 원문을 나누어 기록해 주세요.";
   return null;
 }
+export function sessionSettings(project, number) {
+  const custom = project.sessions?.[String(number)] || {};
+  return {
+    journal: custom.journal ?? !!project.enabled.journal,
+    prompt: custom.prompt ?? !!project.enabled.prompt,
+    access: custom.access || "auto",
+  };
+}
 export function tasksFor(project, sid, records) {
   const done = (kind, unit) =>
     records.some(
@@ -168,26 +176,29 @@ export function tasksFor(project, sid, records) {
       done: done("survey", "PRE"),
       open: true,
     });
-  for (let i = 1; i <= project.sessionCount; i++)
+  for (let i = 1; i <= project.sessionCount; i++) {
+    const settings = sessionSettings(project, i);
+    const open =
+      settings.access === "open" ||
+      (settings.access !== "locked" && out.every((t) => t.done));
     for (const kind of ["journal", "prompt"])
-      if (project.enabled[kind])
+      if (settings[kind])
         out.push({
           kind,
           unit: String(i),
           title: `${i}차시 ${kind === "journal" ? "탐구 돌아보기" : "AI 대화 기록"}`,
           done: done(kind, i),
-          open: !project.enabled.PRE || done("survey", "PRE"),
+          open,
         });
-  const sessionsDone = out
-    .filter((t) => t.kind !== "survey")
-    .every((t) => t.done);
+  }
+  const sessionsDone = out.every((t) => t.done);
   if (project.enabled.POST)
     out.push({
       kind: "survey",
       unit: "POST",
       title: phaseNames.POST,
       done: done("survey", "POST"),
-      open: project.postOpen || sessionsDone,
+      open: !!project.postOpen || sessionsDone,
     });
   if (project.enabled.DELAYED)
     out.push({
@@ -195,7 +206,7 @@ export function tasksFor(project, sid, records) {
       unit: "DELAYED",
       title: phaseNames.DELAYED,
       done: done("survey", "DELAYED"),
-      open: project.delayedOpen,
+      open: !!project.delayedOpen,
     });
   return out;
 }

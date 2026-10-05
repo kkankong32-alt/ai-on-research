@@ -189,7 +189,7 @@ export function watchProjects(cb, err) {
 }
 export function watchProject(id, cb, err) {
   if (demo) {
-    const f = () => cb(memory.projects.find((p) => p.id === id));
+    const f = () => cb({ ...memory.projects.find((p) => p.id === id) });
     f();
     listeners.add(f);
     return () => listeners.delete(f);

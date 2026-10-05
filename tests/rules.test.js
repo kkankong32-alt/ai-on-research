@@ -135,6 +135,44 @@ function record(s) {
     submittedAt: null,
   };
 }
+test("session-specific enablement and manual lock are enforced on writes", async () => {
+  await env.withSecurityRulesDisabled((c) =>
+    updateDoc(doc(c.firestore(), "projects", "p"), {
+      "enabled.prompt": false,
+      sessions: {
+        1: { prompt: true, access: "open" },
+        2: { prompt: true, access: "locked" },
+        3: { prompt: false },
+      },
+    }),
+  );
+  const prompt = (n) => ({
+    ...record("S001"),
+    kind: "prompt",
+    unit: String(n),
+    session_id: n,
+    phase: null,
+    data: { raw: "나: 빛이 뭐야?", turns: [], note: "", tool: "" },
+  });
+  await assertSucceeds(
+    setDoc(
+      doc(anon("a"), "projects", "p", "records", "S001_prompt_1"),
+      prompt(1),
+    ),
+  );
+  await assertFails(
+    setDoc(
+      doc(anon("a"), "projects", "p", "records", "S001_prompt_2"),
+      prompt(2),
+    ),
+  );
+  await assertFails(
+    setDoc(
+      doc(anon("a"), "projects", "p", "records", "S001_prompt_3"),
+      prompt(3),
+    ),
+  );
+});
 test("student A cannot read or write student B", async () => {
   const d = anon("a");
   await assertFails(

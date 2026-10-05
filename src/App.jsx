@@ -31,7 +31,9 @@ export default function App() {
     [error, setError] = useState("");
   const navigate = useNavigate();
   const route = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [route.pathname]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [route.pathname]);
   useEffect(() => {
     store
       .resume()
@@ -248,7 +250,7 @@ function Landing({ user, signed }) {
         >
           연구자 로그인 <ArrowUpRight size={16} />
         </button>
-        {import.meta.env.DEV && (
+        {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_PREVIEW === "true" || ["localhost", "127.0.0.1"].includes(location.hostname)) && (
           <details className="preview-links">
             <summary>개발 미리보기</summary>
             <p>

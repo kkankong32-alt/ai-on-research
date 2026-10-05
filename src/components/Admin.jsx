@@ -17,7 +17,12 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import * as store from "../services/store.js";
-import { tasksFor, scoreSurvey, phaseNames } from "../utils/domain.js";
+import {
+  tasksFor,
+  scoreSurvey,
+  phaseNames,
+  sessionSettings,
+} from "../utils/domain.js";
 import { csv, download, exportRows } from "../utils/export.js";
 import { CODES, RUBRIC } from "../data/codebook.js";
 import {
@@ -241,9 +246,13 @@ function ProjectForm({ original, onSaved }) {
         !form.topic.trim()
       )
         throw Error("프로젝트 기본정보를 모두 입력해 주세요.");
-      if (form.sessionCount < 1 || form.sessionCount > 30)
+      if (
+        !Number.isInteger(form.sessionCount) ||
+        form.sessionCount < 1 ||
+        form.sessionCount > 30
+      )
         throw Error("차시 수는 1~30으로 입력해 주세요.");
-      if (!Object.entries(form.enabled).some(([k, v]) => k !== "validity" && v))
+      if (!tasksFor(form, "preview", []).length)
         throw Error("사용할 학생 기록을 하나 이상 선택해 주세요.");
       if (original) {
         await store.updateProject(original.id, {
@@ -253,6 +262,19 @@ function ProjectForm({ original, onSaved }) {
           topic: form.topic,
           startDate: form.startDate,
           enabled: form.enabled,
+          sessionCount: form.sessionCount,
+          sessions: Object.fromEntries(
+            Array.from({ length: form.sessionCount }, (_, i) => {
+              const n = i + 1;
+              return [
+                n,
+                {
+                  ...sessionSettings(form, n),
+                  access: sessionSettings(original, n).access,
+                },
+              ];
+            }),
+          ),
         });
         onSaved();
       } else {
@@ -334,7 +356,7 @@ function ProjectForm({ original, onSaved }) {
                 label="차시 수"
                 hint={
                   original
-                    ? "기록 연결을 보존하기 위해 생성 후 차시 수는 고정됩니다."
+                    ? "차시를 줄이거나 기록을 끄면 여정에서 제외됩니다. 기존 원자료는 보존됩니다."
                     : null
                 }
               >
@@ -342,7 +364,6 @@ function ProjectForm({ original, onSaved }) {
                   type="number"
                   min="1"
                   max="30"
-                  disabled={!!original}
                   value={form.sessionCount}
                   onChange={(e) =>
                     change("sessionCount", Number(e.target.value))
@@ -398,8 +419,12 @@ function ProjectForm({ original, onSaved }) {
             <h2>프로젝트에서 사용할 기록</h2>
             {[
               ["PRE", "사전검사", "탐구 시작 전 나의 생각"],
-              ["journal", "차시별 성찰저널", "질문, 발견, 확인, 마음의 기록"],
-              ["prompt", "AI 대화 기록", "원문과 발화별 코딩"],
+              [
+                "journal",
+                "모든 차시에 탐구 돌아보기 사용",
+                "질문, 발견, 확인, 마음의 기록",
+              ],
+              ["prompt", "모든 차시에 AI 대화 기록 사용", "원문과 발화별 코딩"],
               ["POST", "사후검사", "차시 기록 완료 후 자동 개방"],
               ["DELAYED", "지연검사", "관리자가 정한 시점에 수동 개방"],
               ["validity", "내용타당도 검토", "관리자 전용 연구도구"],
@@ -407,13 +432,29 @@ function ProjectForm({ original, onSaved }) {
               <label className="setting-option" key={k}>
                 <input
                   type="checkbox"
-                  checked={form.enabled[k]}
-                  onChange={(e) =>
-                    change("enabled", {
-                      ...form.enabled,
-                      [k]: e.target.checked,
-                    })
+                  checked={
+                    ["journal", "prompt"].includes(k)
+                      ? Array.from(
+                          { length: form.sessionCount },
+                          (_, i) => sessionSettings(form, i + 1)[k],
+                        ).every(Boolean)
+                      : form.enabled[k]
                   }
+                  onChange={(e) => {
+                    const value = e.target.checked;
+                    setForm((f) => ({
+                      ...f,
+                      enabled: { ...f.enabled, [k]: value },
+                      sessions: ["journal", "prompt"].includes(k)
+                        ? Object.fromEntries(
+                            Object.entries(f.sessions || {}).map(([n, s]) => [
+                              n,
+                              { ...s, [k]: value },
+                            ]),
+                          )
+                        : f.sessions || {},
+                    }));
+                  }}
                 />
                 <span>
                   <strong>{t}</strong>
@@ -421,6 +462,40 @@ function ProjectForm({ original, onSaved }) {
                 </span>
               </label>
             ))}
+            <details>
+              <summary>차시별로 다르게 설정</summary>
+              {Array.from({ length: form.sessionCount }, (_, i) => i + 1).map(
+                (n) => (
+                  <div className="card" key={n}>
+                    <strong>{n}차시</strong>
+                    {[
+                      ["journal", "탐구 돌아보기"],
+                      ["prompt", "AI 대화 기록"],
+                    ].map(([kind, label]) => (
+                      <label className="setting-option" key={kind}>
+                        <input
+                          type="checkbox"
+                          checked={sessionSettings(form, n)[kind]}
+                          onChange={(e) =>
+                            change("sessions", {
+                              ...form.sessions,
+                              [n]: {
+                                ...sessionSettings(form, n),
+                                [kind]: e.target.checked,
+                              },
+                            })
+                          }
+                        />
+                        {n}차시 {label} 사용
+                      </label>
+                    ))}
+                  </div>
+                ),
+              )}
+            </details>
+            <p role="status">
+              학생 활동 총 {tasksFor(form, "preview", []).length}개
+            </p>
           </>
         )}
       </section>
@@ -615,7 +690,7 @@ function ProgressTable({ p, participants, records, open }) {
                         <span
                           className={has("journal", i + 1) ? "done-text" : ""}
                         >
-                          {p.enabled.journal
+                          {sessionSettings(p, i + 1).journal
                             ? has("journal", i + 1)
                               ? "✓ J"
                               : "— J"
@@ -624,7 +699,7 @@ function ProgressTable({ p, participants, records, open }) {
                         <span
                           className={has("prompt", i + 1) ? "done-text" : ""}
                         >
-                          {p.enabled.prompt
+                          {sessionSettings(p, i + 1).prompt
                             ? has("prompt", i + 1)
                               ? "✓ P"
                               : "— P"
@@ -1191,6 +1266,35 @@ function ProjectActions({ p }) {
   return (
     <section className="card narrow">
       <h2>운영 설정</h2>
+      <h3>차시 열기와 잠금</h3>
+      <p>
+        순차 진행은 사전검사와 앞 차시의 사용 활동을 완료하면 열립니다. 수동
+        열기는 앞 활동을 완료하지 않아도 해당 차시를 엽니다.
+      </p>
+      {Array.from({ length: p.sessionCount }, (_, i) => i + 1).map((n) => (
+        <Field key={n} label={`${n}차시 진행 방식`}>
+          <select
+            value={sessionSettings(p, n).access}
+            onChange={async (e) => {
+              try {
+                await store.updateProject(p.id, {
+                  sessions: {
+                    ...p.sessions,
+                    [n]: { ...sessionSettings(p, n), access: e.target.value },
+                  },
+                });
+                setMsg(`${n}차시 진행 방식을 저장했습니다.`);
+              } catch (e) {
+                setMsg(e.message);
+              }
+            }}
+          >
+            <option value="auto">순차 진행 (기본)</option>
+            <option value="open">수동 열기</option>
+            <option value="locked">잠금</option>
+          </select>
+        </Field>
+      ))}
       {[
         ["postOpen", "사후검사 지금 열기"],
         ["delayedOpen", "지연검사 열기"],
@@ -1239,6 +1343,7 @@ function ProjectActions({ p }) {
               startDate,
               sessionCount,
               enabled,
+              sessions,
             } = p;
             const id = await store.createProject({
               name: name + " (복제)",
@@ -1248,6 +1353,12 @@ function ProjectActions({ p }) {
               startDate,
               sessionCount,
               enabled,
+              sessions: Object.fromEntries(
+                Object.entries(sessions || {}).map(([n, s]) => [
+                  n,
+                  { ...s, access: "auto" },
+                ]),
+              ),
               count,
               names: "",
             });

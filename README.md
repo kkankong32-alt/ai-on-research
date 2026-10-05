@@ -2,6 +2,14 @@
 
 초등 과학탐구의 사전·사후·지연 검사, 성찰저널, AI 대화 기록을 프로젝트와 익명 학생 ID로 연결하는 연구용 웹앱입니다.
 
+## 팀 공유 미리보기
+
+공유 주소: https://kkankong32-alt.github.io/ai-on-research/
+
+2026-10-05 사용자의 공개 허용에 따라 GitHub Pages 배포를 사용합니다. 아래 로컬 전용 안내는 이전 보관 방식이며, 현재는 공개 코드와 웹사이트를 함께 제공합니다. 첫 화면의 ‘개발 미리보기’에서 학생·연구관리 화면을 로그인 없이 확인할 수 있습니다. 미리보기 기록은 메모리에서만 유지되며 새로고침하면 사라집니다. 실제 로그인·저장은 Firebase를 사용하며 운영 전 실서비스 검증은 여전히 필요합니다.
+
+GitHub Actions가 단위검사와 보안 규칙 에뮬레이터 검사를 통과한 뒤 빌드·배포합니다. Firebase 웹앱 공개 설정만 저장소 Variables로 공급하며 관리 토큰·서비스계정 키·학생 원자료는 저장소에 포함하지 않습니다.
+
 ## 실행
 
 Node 22+, Java 21+ 필요(보안 규칙 테스트).
@@ -15,7 +23,7 @@ npm run test:rules
 npm run build
 ```
 
-Firebase 공개 웹앱 설정은 `.env.local` 또는 GitHub Repository Variables로 공급합니다. 서비스 계정 키는 필요하지 않습니다. 최초 관리자 등록은 승인된 프로젝트 소유자의 권한으로 수행하고 일반 앱에서 자동 승격하지 않습니다.
+Firebase 웹앱 설정은 `.env.local`로 공급합니다. 서비스 계정 키는 필요하지 않습니다. 최초 관리자 등록은 승인된 프로젝트 소유자의 권한으로 수행하고 일반 앱에서 자동 승격하지 않습니다.
 
 ## 데이터와 권한
 
@@ -32,13 +40,15 @@ Firebase 공개 웹앱 설정은 `.env.local` 또는 GitHub Repository Variables
 
 ## 운영
 
-Firebase 프로젝트: `ai-on-research-2026-kk21`. Firestore: 서울 `asia-northeast3`, Spark 무료 할당량. Cloud Functions/결제/Analytics 없음. Google 및 익명 인증을 사용합니다. 프런트엔드 배포: GitHub Pages Actions. HashRouter를 사용하므로 하위 경로 새로고침도 동작합니다.
+Firebase 프로젝트: `ai-on-research-2026-kk21`. Firestore: 서울 `asia-northeast3`, Spark 무료 할당량. Cloud Functions/결제/Analytics 없음. Google 및 익명 인증을 사용합니다. 사용자 요청에 따라 코드와 연구도구는 로컬에만 보관하며 자동 공개 배포 설정을 제거했습니다. 실행은 `START.cmd`를 열고 Chrome 또는 Edge에서 http://127.0.0.1:5173 에 접속하세요. Node.js 22 이상이 필요합니다. 제공된 dist는 이미 빌드되어 npm 설치 없이 실행할 수 있습니다.
+
+**로컬 실행은 오프라인 전용이라는 뜻이 아닙니다.** 인증과 연구자료 저장에는 연결된 Firebase 및 인터넷을 사용합니다. 로컬 주소·QR은 다른 기기로 접속할 수 없습니다. 학생의 여러 기기에서 사용하려면 별도의 비공개 접근 방식 검토가 필요합니다.
 
 ```sh
 firebase deploy --only firestore --project ai-on-research-2026-kk21
 ```
 
-규칙 변경은 Emulator 테스트 후 별도 배포합니다. GitHub Actions에는 Firebase 관리 키나 토큰을 저장하지 않습니다. 사용량 한도에 도달하면 저장 오류가 표시되며 유료 요금제로 자동 전환하지 않습니다.
+규칙 변경은 Emulator 테스트 후 별도 배포합니다. 결과물에 Firebase 관리 키나 토큰을 저장하지 않습니다. 사용량 한도에 도달하면 저장 오류가 표시되며 유료 요금제로 자동 전환하지 않습니다.
 
 ## 연구도구 주의사항
 

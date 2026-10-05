@@ -128,7 +128,92 @@ test("pre and post task gates, optional journals, delayed manual", () => {
     { id: "S007_journal_1", status: "submitted" },
   ]);
   assert.equal(t[2].open, true);
-  assert.equal(t[3].open, undefined);
+  assert.equal(t[3].open, false);
+});
+test("journey totals follow 3 and 6 sessions without fixed counts", () => {
+  for (const [sessionCount, total] of [
+    [3, 8],
+    [6, 14],
+  ]) {
+    const p = {
+      sessionCount,
+      enabled: { PRE: true, POST: true, journal: true, prompt: true },
+    };
+    assert.equal(tasksFor(p, "S007", []).length, total);
+  }
+});
+test("per-session overrides omit disabled activities and retain stable identities", () => {
+  const p = {
+    sessionCount: 3,
+    enabled: { journal: true, prompt: true },
+    sessions: {
+      1: { journal: false, prompt: false },
+      2: { prompt: false },
+      3: { journal: false },
+    },
+  };
+  const tasks = tasksFor(p, "S007", []);
+  assert.deepEqual(
+    tasks.map((t) => [t.kind, t.unit, t.open]),
+    [
+      ["journal", "2", true],
+      ["prompt", "3", false],
+    ],
+  );
+  assert.equal(tasksFor({ ...p, sessionCount: 2 }, "S007", []).length, 1);
+});
+test("sequential sessions require all enabled earlier activities and skip disabled kinds", () => {
+  const p = {
+    sessionCount: 3,
+    enabled: { PRE: true, journal: true, prompt: true },
+    sessions: { 2: { prompt: false } },
+  };
+  const records = ["survey_PRE", "journal_1"].map((id) => ({
+    id: `S007_${id}`,
+    status: "submitted",
+  }));
+  let t = tasksFor(p, "S007", records);
+  assert.equal(t.find((x) => x.unit === "2").open, false);
+  assert.equal(t.find((x) => !x.done && x.open).kind, "prompt");
+  records.push({ id: "S007_prompt_1", status: "submitted" });
+  t = tasksFor(p, "S007", records);
+  assert.equal(t.find((x) => !x.done && x.open).unit, "2");
+  records.push({ id: "S007_journal_2", status: "submitted" });
+  assert.equal(
+    tasksFor(p, "S007", records).find((x) => !x.done && x.open).unit,
+    "3",
+  );
+});
+test("manual open bypasses earlier incomplete sessions; explicit lock overrides auto", () => {
+  const p = {
+    sessionCount: 3,
+    enabled: { journal: true },
+    sessions: { 1: { access: "locked" }, 3: { access: "open" } },
+  };
+  const t = tasksFor(p, "S007", []);
+  assert.deepEqual(
+    t.map((x) => x.open),
+    [false, false, true],
+  );
+  assert.equal(t.find((x) => !x.done && x.open).unit, "3");
+  assert.equal(
+    tasksFor({ ...p, sessions: { 1: { access: "locked" } } }, "S007", []).find(
+      (x) => !x.done && x.open,
+    ),
+    undefined,
+  );
+});
+test("only configured completed records count; draft and removed records do not advance journey", () => {
+  const p = { sessionCount: 1, enabled: { journal: true, POST: true } };
+  const records = [
+    { id: "S007_journal_1", status: "draft" },
+    { id: "S007_prompt_1", status: "submitted" },
+    { id: "S007_journal_2", status: "submitted" },
+  ];
+  const t = tasksFor(p, "S007", records);
+  assert.equal(t.length, 2);
+  assert.equal(t.filter((x) => x.done).length, 0);
+  assert.equal(t.find((x) => x.unit === "POST").open, false);
 });
 test("missing and invalid survey answers do not submit", () => {
   assert.ok(validateRecord("survey", { raw: {} }, true));

@@ -96,7 +96,12 @@ function StudentHome({ user, project, tasks }) {
           <Status type="green">
             {done === tasks.length ? "탐구 기록 완료" : "지금 할 일"}
           </Status>
-          <h2>{next?.title || "모든 기록을 차곡차곡 남겼어요!"}</h2>
+          <h2>
+            {next?.title ||
+              (done === tasks.length
+                ? "모든 기록을 차곡차곡 남겼어요!"
+                : "다음 탐구가 열리면 이어가요")}
+          </h2>
           <p>{project.name}</p>
           {next && (
             <Link
