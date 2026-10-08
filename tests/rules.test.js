@@ -15,6 +15,7 @@ import {
   writeBatch,
   serverTimestamp,
   query,
+  runTransaction,
   where,
 } from "firebase/firestore";
 let env;
@@ -135,6 +136,18 @@ function record(s) {
     submittedAt: null,
   };
 }
+test("admin can check and create new school login mappings while feature is disabled", async () => {
+  const d = admin();
+  await updateDoc(doc(d, 'projects', 'p'), {schoolLoginEnabled: false});
+  for (const col of ['school_projects', 'school_access']) {
+    const ref = doc(d, col, 'f'.repeat(64));
+    await assertSucceeds(runTransaction(d, async tx => {
+      const existing = await tx.get(ref);
+      if (existing.exists()) throw Error('Unexpected mapping');
+      tx.set(ref, {project_id:'p', participant_id:'S001', tokenVersion:1, projectCode:'test'});
+    }));
+  }
+});
 test("short project codes cannot be listed or used when school login is off", async () => {
   const hash = 'e'.repeat(64);
   await env.withSecurityRulesDisabled(async c => {
