@@ -138,6 +138,9 @@ export default function App() {
   );
 }
 function Landing({ user, signed }) {
+  const [previewPassword, setPreviewPassword] = useState("");
+  const [previewUnlocked, setPreviewUnlocked] = useState(false);
+  const [previewError, setPreviewError] = useState("");
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const [method, setMethod] = useState(
     params.has("school") ? "school" : "code",
@@ -270,17 +273,19 @@ function Landing({ user, signed }) {
             </div>
             {method === "school" ? (
               <>
-                <Field
-                  label="프로젝트 입장코드"
-                  hint="선생님이 준 전용 링크로 들어오면 자동 입력돼요."
-                >
-                  <input
-                    required
-                    value={projectCode}
-                    onChange={(e) => setProjectCode(e.target.value)}
-                    autoComplete="off"
-                  />
-                </Field>
+                {!params.get("school") && (
+                  <Field
+                    label="프로젝트 입장코드"
+                    hint="선생님이 준 전용 링크로 들어오면 자동 입력돼요."
+                  >
+                    <input
+                      required
+                      value={projectCode}
+                      onChange={(e) => setProjectCode(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </Field>
+                )}
                 {[
                   ["grade", "학년"],
                   ["classroom", "반"],
@@ -340,17 +345,43 @@ function Landing({ user, signed }) {
           import.meta.env.VITE_ENABLE_PREVIEW === "true" ||
           ["localhost", "127.0.0.1"].includes(location.hostname)) && (
           <details className="preview-links">
-            <summary>개발 미리보기</summary>
-            <p>
-              실제 학생 정보는 입력하지 마세요. 새로고침하면 미리보기 기록이
-              사라집니다.
-            </p>
-            <Button onClick={() => signed(store.preview("student"))}>
-              학생 화면 보기
-            </Button>
-            <Button onClick={() => signed(store.preview())}>
-              연구관리 화면 보기
-            </Button>
+            <summary>관리자 체험</summary>
+            {!previewUnlocked ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (previewPassword === "AIONdudwo") {
+                    setPreviewUnlocked(true);
+                    setPreviewPassword("");
+                    setPreviewError("");
+                  } else setPreviewError("체험 암호를 확인해 주세요.");
+                }}
+              >
+                <Field label="체험 암호">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={previewPassword}
+                    onChange={(e) => setPreviewPassword(e.target.value)}
+                  />
+                </Field>
+                <Button type="submit">체험 열기</Button>
+                <ErrorBox error={previewError} />
+              </form>
+            ) : (
+              <>
+                <p>
+                  실제 학생 정보는 입력하지 마세요. 새로고침하면 미리보기 기록이
+                  사라집니다.
+                </p>
+                <Button onClick={() => signed(store.preview("student"))}>
+                  학생 화면 보기
+                </Button>
+                <Button onClick={() => signed(store.preview())}>
+                  연구관리 화면 보기
+                </Button>
+              </>
+            )}
           </details>
         )}
       </section>

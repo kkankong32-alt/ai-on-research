@@ -1237,7 +1237,7 @@ function SchoolLoginSettings({ p, participants, roster, refresh }) {
       .then(setConfig)
       .catch((e) => setError(e.message));
   }, [p.id]);
-  const url = `${location.href.split("#")[0]}#/?school=${encodeURIComponent(config.projectCode || "")}`;
+  const url = `${location.href.split("#")[0]}#/?school=${encodeURIComponent(config.shortCode || config.projectCode || "")}`;
   return (
     <section className="card no-print">
       <h2>학년·반·번호 로그인</h2>
@@ -1275,7 +1275,20 @@ function SchoolLoginSettings({ p, participants, roster, refresh }) {
       {p.schoolLoginEnabled && config.projectCode && (
         <>
           <Field label="프로젝트 입장코드">
-            <input readOnly value={config.projectCode} />
+            <input readOnly value={config.shortCode || config.projectCode} />
+            {!config.shortCode && (
+              <Button
+                onClick={async () => {
+                  try {
+                    setConfig(await store.configureSchoolLogin(p.id, true));
+                  } catch (e) {
+                    setError(e.message);
+                  }
+                }}
+              >
+                쉬운 6자리 코드 만들기
+              </Button>
+            )}
           </Field>
           <Field label="학생용 프로젝트 전용 링크">
             <input readOnly value={url} />

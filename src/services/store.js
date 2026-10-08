@@ -351,15 +351,22 @@ export async function configureSchoolLogin(pid, enabled) {
   const settings = {
     ...existing,
     projectCode: existing.projectCode || newCode(),
+    shortCode: existing.shortCode || normalizeCode(newCode()).slice(0, 6),
   };
   if (demo) {
     memory.login[pid] = settings;
     await updateProject(pid, { schoolLoginEnabled: enabled });
   } else {
-    const batch = writeBatch(db);
-    batch.set(doc(db, "projects", pid, "private_settings", "login"), settings);
-    batch.update(doc(db, "projects", pid), { schoolLoginEnabled: enabled });
-    await batch.commit();
+    const hash = await hashCode(settings.shortCode);
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, "school_projects", hash);
+      const current = await tx.get(ref);
+      if (current.exists() && current.data().project_id !== pid)
+        throw Error("프로젝트 코드가 겹쳤습니다. 다시 켜 주세요.");
+      tx.set(ref, { project_id: pid, projectCode: settings.projectCode });
+      tx.set(doc(db, "projects", pid, "private_settings", "login"), settings);
+      tx.update(doc(db, "projects", pid), { schoolLoginEnabled: enabled });
+    });
   }
   return settings;
 }
@@ -414,6 +421,24 @@ export async function saveSchoolIdentity(pid, sid, fields) {
   });
 }
 export async function schoolLogin(projectCode, grade, classroom, number) {
+  if (demo) {
+    const match = Object.values(memory.login).find(
+      (v) => normalizeCode(v.shortCode || "") === normalizeCode(projectCode),
+    );
+    if (match) projectCode = match.projectCode;
+  } else if (normalizeCode(projectCode).length === 6) {
+    if (!configured) throw Error("접속 설정을 확인해 주세요.");
+    await setPersistence(auth, browserLocalPersistence);
+    if (!auth.currentUser?.isAnonymous) {
+      if (auth.currentUser) await signOut(auth);
+      await signInAnonymously(auth);
+    }
+    const match = await getDoc(
+      doc(db, "school_projects", await hashCode(projectCode)),
+    );
+    if (!match.exists()) throw Error("프로젝트 코드를 확인해 주세요.");
+    projectCode = match.data().projectCode;
+  }
   const key = schoolLoginKey(projectCode, grade, classroom, number);
   if (demo) {
     const hash = await hashCode(key);

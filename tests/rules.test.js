@@ -135,6 +135,18 @@ function record(s) {
     submittedAt: null,
   };
 }
+test("short project codes cannot be listed or used when school login is off", async () => {
+  const hash = 'e'.repeat(64);
+  await env.withSecurityRulesDisabled(async c => {
+    await updateDoc(doc(c.firestore(), 'projects', 'p'), {schoolLoginEnabled: true});
+    await setDoc(doc(c.firestore(), 'school_projects', hash), {project_id: 'p', projectCode: 'test-only'});
+  });
+  await assertSucceeds(getDoc(doc(anon('a'), 'school_projects', hash)));
+  await assertFails(getDocs(collection(anon('a'), 'school_projects')));
+  await assertFails(setDoc(doc(anon('a'), 'school_projects', hash), {project_id: 'q'}));
+  await updateDoc(doc(admin(), 'projects', 'p'), {schoolLoginEnabled: false});
+  await assertFails(getDoc(doc(anon('a'), 'school_projects', hash)));
+});
 test("submitted dialogue without a tool and with recorded question is accepted", async () => {
   const r = {
     ...record("S001"),
