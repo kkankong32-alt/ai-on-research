@@ -25,6 +25,15 @@ export function newCode() {
   return s.match(/.{4}/g).join("-");
 }
 export const normalizeCode = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+export function schoolLoginKey(projectCode, grade, classroom, number) {
+  const values = [grade, classroom, number].map(Number);
+  if (
+    !normalizeCode(projectCode) ||
+    !values.every((n) => Number.isInteger(n) && n >= 1 && n <= 999)
+  )
+    throw Error("프로젝트 입장코드와 학년·반·번호(1~999)를 확인해 주세요.");
+  return `SCHOOL${normalizeCode(projectCode)}G${values[0]}C${values[1]}N${values[2]}`;
+}
 export async function hashCode(s) {
   return Array.from(
     new Uint8Array(

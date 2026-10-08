@@ -135,6 +135,92 @@ function record(s) {
     submittedAt: null,
   };
 }
+test("school login binds same student, isolates peers, and revokes when disabled", async () => {
+  const hash = "c".repeat(64);
+  const link = { project_id: "p", participant_id: "S001", tokenVersion: 1 };
+  await env.withSecurityRulesDisabled(async (c) => {
+    await updateDoc(doc(c.firestore(), "projects", "p"), {
+      schoolLoginEnabled: true,
+    });
+    await setDoc(doc(c.firestore(), "school_access", hash), link);
+    await setDoc(
+      doc(c.firestore(), "projects", "p", "private_settings", "login"),
+      { projectCode: "PRIVATE" },
+    );
+  });
+  const d = anon("school-device");
+  await assertSucceeds(getDoc(doc(d, "school_access", hash)));
+  await assertFails(getDocs(collection(d, "school_access")));
+  await assertFails(
+    getDoc(doc(d, "projects", "p", "private_settings", "login")),
+  );
+  await assertFails(
+    setDoc(doc(d, "bindings", "school-device"), {
+      ...link,
+      participant_id: "S002",
+      codeHash: hash,
+      loginMethod: "school",
+    }),
+  );
+  await assertSucceeds(
+    setDoc(doc(d, "bindings", "school-device"), {
+      ...link,
+      codeHash: hash,
+      loginMethod: "school",
+    }),
+  );
+  await assertSucceeds(
+    getDoc(doc(d, "projects", "p", "records", "S001_survey_PRE")),
+  );
+  await assertFails(
+    getDoc(doc(d, "projects", "p", "records", "S002_survey_PRE")),
+  );
+  await assertFails(getDoc(doc(d, "projects", "q")));
+  await assertSucceeds(
+    updateDoc(doc(admin(), "projects", "p"), { schoolLoginEnabled: false }),
+  );
+  await assertFails(
+    getDoc(doc(d, "projects", "p", "records", "S001_survey_PRE")),
+  );
+  await assertFails(
+    setDoc(doc(d, "bindings", "school-device"), {
+      ...link,
+      codeHash: hash,
+      loginMethod: "school",
+    }),
+  );
+  await assertSucceeds(
+    getDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")),
+  );
+});
+test("changed school number invalidates old binding and students cannot register themselves", async () => {
+  const hash = "d".repeat(64);
+  await env.withSecurityRulesDisabled(async (c) => {
+    await updateDoc(doc(c.firestore(), "projects", "p"), {
+      schoolLoginEnabled: true,
+    });
+    await setDoc(doc(c.firestore(), "school_access", hash), {
+      project_id: "p",
+      participant_id: "S002",
+      tokenVersion: 1,
+    });
+    await setDoc(doc(c.firestore(), "bindings", "old-number"), {
+      project_id: "p",
+      participant_id: "S001",
+      tokenVersion: 1,
+      codeHash: hash,
+      loginMethod: "school",
+    });
+  });
+  await assertFails(getDoc(doc(anon("old-number"), "projects", "p")));
+  await assertFails(
+    setDoc(doc(anon("a"), "school_access", hash), {
+      project_id: "p",
+      participant_id: "S001",
+      tokenVersion: 1,
+    }),
+  );
+});
 test("session-specific enablement and manual lock are enforced on writes", async () => {
   await env.withSecurityRulesDisabled((c) =>
     updateDoc(doc(c.firestore(), "projects", "p"), {

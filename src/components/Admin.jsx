@@ -1061,6 +1061,12 @@ function AccessCards({ p, participants }) {
   }, [p.id, participants]);
   return (
     <>
+      <SchoolLoginSettings
+        p={p}
+        participants={participants}
+        roster={roster}
+        refresh={refresh}
+      />
       <div className="no-print">
         <div className="section-heading">
           <div>
@@ -1075,7 +1081,7 @@ function AccessCards({ p, participants }) {
           <Button
             onClick={() =>
               navigator.clipboard
-                .writeText(`${link}#/?project=${p.id}`)
+                .writeText(`${link}#/`)
                 .then(() => setError("프로젝트 링크를 복사했습니다."))
                 .catch(() =>
                   setError(
@@ -1174,6 +1180,141 @@ function AccessCards({ p, participants }) {
         ))}
       </div>
     </>
+  );
+}
+function SchoolLoginSettings({ p, participants, roster, refresh }) {
+  const [config, setConfig] = useState({});
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    store
+      .getSchoolLogin(p.id)
+      .then(setConfig)
+      .catch((e) => setError(e.message));
+  }, [p.id]);
+  const url = `${location.href.split("#")[0]}#/?school=${encodeURIComponent(config.projectCode || "")}`;
+  return (
+    <section className="card no-print">
+      <h2>학년·반·번호 로그인</h2>
+      <p>
+        개인코드·QR 로그인은 계속 사용할 수 있습니다. 이 방식은 프로젝트 전용
+        링크와 학생의 학년·반·번호로 같은 기록장에 연결합니다.
+      </p>
+      <p>
+        학년·반·번호는 비밀번호가 아니므로 서로의 번호를 아는 학생이 다른
+        학생으로 접속할 수 있습니다. 본인 구분이 중요한 수집에는 개인코드를
+        사용하세요.
+      </p>
+      <label className="setting-option">
+        <input
+          type="checkbox"
+          disabled={busy}
+          checked={!!p.schoolLoginEnabled}
+          onChange={async (e) => {
+            setBusy(true);
+            setError("");
+            try {
+              setConfig(
+                await store.configureSchoolLogin(p.id, e.target.checked),
+              );
+            } catch (e) {
+              setError(e.message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+        이 프로젝트에서 학년·반·번호 로그인 사용
+      </label>
+      <ErrorBox error={error} />
+      {p.schoolLoginEnabled && config.projectCode && (
+        <>
+          <Field label="프로젝트 입장코드">
+            <input readOnly value={config.projectCode} />
+          </Field>
+          <Field label="학생용 프로젝트 전용 링크">
+            <input readOnly value={url} />
+          </Field>
+          <Button
+            onClick={() =>
+              navigator.clipboard
+                .writeText(url)
+                .then(() => setError("전용 링크를 복사했습니다."))
+                .catch(() => setError("위 링크를 직접 복사해 주세요."))
+            }
+          >
+            전용 링크 복사
+          </Button>
+          <p>
+            아래 학생별 학년·반·번호를 저장한 뒤 링크를 배부하세요. 등록하지
+            않은 번호는 접속할 수 없습니다.
+          </p>
+          {participants.map((s) => (
+            <SchoolIdentity
+              key={s.id}
+              pid={p.id}
+              student={s}
+              initial={roster[s.id]?.school}
+              onSaved={refresh}
+            />
+          ))}
+        </>
+      )}
+    </section>
+  );
+}
+function SchoolIdentity({ pid, student, initial, onSaved }) {
+  const [fields, setFields] = useState(
+    initial || { grade: "", classroom: "", number: "" },
+  );
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setFields(initial || { grade: "", classroom: "", number: "" });
+  }, [initial]);
+  return (
+    <div className="card">
+      <strong>
+        {student.displayName} · {student.id}
+        {!student.active ? " (비활성)" : ""}
+      </strong>
+      <div className="row wrap">
+        {[
+          ["grade", "학년"],
+          ["classroom", "반"],
+          ["number", "번호"],
+        ].map(([k, label]) => (
+          <Field key={k} label={`${student.id} ${label}`}>
+            <input
+              type="number"
+              min="1"
+              max="999"
+              value={fields[k]}
+              onChange={(e) => setFields({ ...fields, [k]: e.target.value })}
+            />
+          </Field>
+        ))}
+        <Button
+          busy={busy}
+          onClick={async () => {
+            setBusy(true);
+            setMessage("");
+            try {
+              await store.saveSchoolIdentity(pid, student.id, fields);
+              await onSaved();
+              setMessage("저장했습니다.");
+            } catch (e) {
+              setMessage(e.message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          학년·반·번호 저장
+        </Button>
+      </div>
+      <p role="status">{message}</p>
+    </div>
   );
 }
 function Exports({ p, participants, records, codings }) {

@@ -26,6 +26,8 @@ import {
   makeParticipants,
   recordKey,
   INSTRUMENT_VERSION,
+  schoolLoginKey,
+  normalizeCode,
 } from "../utils/domain.js";
 
 let demo = false,
@@ -38,6 +40,7 @@ const memory = {
   codings: {},
   roster: {},
   reviews: {},
+  login: {},
 };
 const emit = () => listeners.forEach((f) => f());
 export const isDemo = () => demo;
@@ -90,16 +93,25 @@ export async function resume() {
     displayName: p.data().displayName,
   });
 }
-export async function studentLogin(code) {
+export async function studentLogin(code, loginMethod = "code") {
   if (demo) {
-    session = {
-      role: "student",
-      project_id: memory.projects[0].id,
-      participant_id: "S007",
-      uid: "preview-student",
-      displayName: "학생 07",
-    };
-    return session;
+    for (const p of memory.projects) {
+      const pair = Object.entries(memory.roster[p.id]).find(
+        ([, r]) => r.code && normalizeCode(r.code) === normalizeCode(code),
+      );
+      const student =
+        pair &&
+        memory.participants[p.id].find((s) => s.id === pair[0] && s.active);
+      if (student && !p.archived)
+        return (session = {
+          role: "student",
+          project_id: p.id,
+          participant_id: student.id,
+          uid: `preview-${student.id}`,
+          displayName: student.displayName,
+        });
+    }
+    throw Error("입력한 접속정보를 다시 확인해 주세요.");
   }
   if (!configured) throw Error("아직 준비 중이에요. 선생님께 알려 주세요.");
   await setPersistence(auth, browserLocalPersistence);
@@ -108,10 +120,16 @@ export async function studentLogin(code) {
     await signInAnonymously(auth);
   }
   const codeHash = await hashCode(code);
-  const a = await getDoc(doc(db, "access", codeHash));
-  if (!a.exists()) throw Error("개인코드를 다시 확인해 주세요.");
+  const a = await getDoc(
+    doc(db, loginMethod === "school" ? "school_access" : "access", codeHash),
+  );
+  if (!a.exists()) throw Error("입력한 접속정보를 다시 확인해 주세요.");
   const v = a.data();
-  await setDoc(doc(db, "bindings", auth.currentUser.uid), { ...v, codeHash });
+  await setDoc(doc(db, "bindings", auth.currentUser.uid), {
+    ...v,
+    codeHash,
+    loginMethod,
+  });
   const p = await getDoc(
     doc(db, "projects", v.project_id, "participants", v.participant_id),
   );
@@ -158,7 +176,12 @@ export function preview(role = "ADMIN") {
     memory.projects = [p];
     memory.participants[p.id] = makeParticipants(20);
     memory.records[p.id] = [];
-    memory.roster[p.id] = {};
+    memory.roster[p.id] = Object.fromEntries(
+      memory.participants[p.id].map((s) => [
+        s.id,
+        { code: newCode(), name: "" },
+      ]),
+    );
     memory.codings[p.id] = {};
     memory.reviews[p.id] = [];
   }
@@ -318,6 +341,105 @@ export async function getRoster(id) {
   const s = await getDocs(collection(db, "projects", id, "private_roster"));
   return Object.fromEntries(s.docs.map((d) => [d.id, d.data()]));
 }
+export async function getSchoolLogin(pid) {
+  if (demo) return memory.login[pid] || {};
+  const r = await getDoc(doc(db, "projects", pid, "private_settings", "login"));
+  return r.data() || {};
+}
+export async function configureSchoolLogin(pid, enabled) {
+  const existing = await getSchoolLogin(pid);
+  const settings = {
+    ...existing,
+    projectCode: existing.projectCode || newCode(),
+  };
+  if (demo) {
+    memory.login[pid] = settings;
+    await updateProject(pid, { schoolLoginEnabled: enabled });
+  } else {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "projects", pid, "private_settings", "login"), settings);
+    batch.update(doc(db, "projects", pid), { schoolLoginEnabled: enabled });
+    await batch.commit();
+  }
+  return settings;
+}
+export async function saveSchoolIdentity(pid, sid, fields) {
+  const config = await getSchoolLogin(pid);
+  const school = Object.fromEntries(
+    ["grade", "classroom", "number"].map((k) => [k, Number(fields[k])]),
+  );
+  const schoolHash = await hashCode(
+    schoolLoginKey(
+      config.projectCode,
+      school.grade,
+      school.classroom,
+      school.number,
+    ),
+  );
+  if (demo) {
+    if (
+      Object.entries(memory.roster[pid]).some(
+        ([id, r]) => id !== sid && r.schoolHash === schoolHash,
+      )
+    )
+      throw Error("이 학년·반·번호는 다른 학생에게 이미 등록되어 있습니다.");
+    memory.roster[pid][sid] = {
+      ...memory.roster[pid][sid],
+      school,
+      schoolHash,
+    };
+    return;
+  }
+  await runTransaction(db, async (tx) => {
+    const rr = doc(db, "projects", pid, "private_roster", sid);
+    const ar = doc(db, "school_access", schoolHash);
+    const [r, a, participant] = await Promise.all([
+      tx.get(rr),
+      tx.get(ar),
+      tx.get(doc(db, "projects", pid, "participants", sid)),
+    ]);
+    if (
+      a.exists() &&
+      (a.data().participant_id !== sid || a.data().project_id !== pid)
+    )
+      throw Error("이 학년·반·번호는 다른 학생에게 이미 등록되어 있습니다.");
+    if (r.data()?.schoolHash && r.data().schoolHash !== schoolHash)
+      tx.delete(doc(db, "school_access", r.data().schoolHash));
+    tx.set(rr, { ...r.data(), school, schoolHash });
+    tx.set(ar, {
+      project_id: pid,
+      participant_id: sid,
+      tokenVersion: participant.data().tokenVersion,
+    });
+  });
+}
+export async function schoolLogin(projectCode, grade, classroom, number) {
+  const key = schoolLoginKey(projectCode, grade, classroom, number);
+  if (demo) {
+    const hash = await hashCode(key);
+    for (const p of memory.projects) {
+      if (!p.schoolLoginEnabled || p.archived) continue;
+      const pair = Object.entries(memory.roster[p.id]).find(
+        ([, r]) => r.schoolHash === hash,
+      );
+      if (pair) {
+        const student = memory.participants[p.id].find(
+          (s) => s.id === pair[0] && s.active,
+        );
+        if (student)
+          return (session = {
+            role: "student",
+            project_id: p.id,
+            participant_id: student.id,
+            uid: `preview-${student.id}`,
+            displayName: student.displayName,
+          });
+      }
+    }
+    throw Error("입력한 접속정보를 다시 확인해 주세요.");
+  }
+  return studentLogin(key, "school");
+}
 export async function changeStudent(pid, sid, patch) {
   if (demo) {
     Object.assign(
@@ -351,6 +473,12 @@ export async function rotateCode(pid, sid) {
       participant_id: sid,
       tokenVersion,
     });
+    if (r.data()?.schoolHash)
+      tx.set(doc(db, "school_access", r.data().schoolHash), {
+        project_id: pid,
+        participant_id: sid,
+        tokenVersion,
+      });
   });
   return code;
 }

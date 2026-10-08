@@ -10,9 +10,26 @@ import {
   questionIds,
   validateRecord,
   tasksFor,
+  schoolLoginKey,
 } from "../src/utils/domain.js";
 import { exportRows, csv } from "../src/utils/export.js";
 import { indices, scaleIndices } from "../src/utils/validity.js";
+test("school identity is project-scoped, normalized and unambiguous", async () => {
+  assert.equal(
+    schoolLoginKey("ABCD-EFGH", "05", "02", "07"),
+    schoolLoginKey("abcdefgh", 5, 2, 7),
+  );
+  assert.notEqual(
+    await hashCode(schoolLoginKey("ABCD", 1, 23, 4)),
+    await hashCode(schoolLoginKey("ABCD", 12, 3, 4)),
+  );
+  assert.notEqual(
+    schoolLoginKey("ABCD", 5, 2, 7),
+    schoolLoginKey("EFGH", 5, 2, 7),
+  );
+  for (const bad of ["", 0, -1, 1.5, 1000, "abc"])
+    assert.throws(() => schoolLoginKey("ABCD", bad, 2, 7));
+});
 test("20 students and expanded IDs remain stable", () => {
   const s = makeParticipants(20);
   assert.equal(s[6].id, "S007");
@@ -166,7 +183,11 @@ test("sequential sessions require all enabled earlier activities and skip disabl
   const p = {
     sessionCount: 3,
     enabled: { PRE: true, journal: true, prompt: true },
-    sessions: { 1: {access: "sequential"}, 2: { prompt: false, access: "sequential" }, 3: {access: "sequential"} },
+    sessions: {
+      1: { access: "sequential" },
+      2: { prompt: false, access: "sequential" },
+      3: { access: "sequential" },
+    },
   };
   const records = ["survey_PRE", "journal_1"].map((id) => ({
     id: `S007_${id}`,
@@ -188,7 +209,11 @@ test("manual open bypasses earlier incomplete sessions; explicit lock overrides 
   const p = {
     sessionCount: 3,
     enabled: { journal: true },
-    sessions: { 1: { access: "locked" }, 2: {access: "sequential"}, 3: { access: "open" } },
+    sessions: {
+      1: { access: "locked" },
+      2: { access: "sequential" },
+      3: { access: "open" },
+    },
   };
   const t = tasksFor(p, "S007", []);
   assert.deepEqual(
@@ -197,9 +222,18 @@ test("manual open bypasses earlier incomplete sessions; explicit lock overrides 
   );
   assert.equal(t.find((x) => !x.done && x.open).unit, "3");
   assert.equal(
-    tasksFor({ ...p, sessions: { 1: { access: "locked" }, 2: {access: "sequential"}, 3: {access: "sequential"} } }, "S007", []).find(
-      (x) => !x.done && x.open,
-    ),
+    tasksFor(
+      {
+        ...p,
+        sessions: {
+          1: { access: "locked" },
+          2: { access: "sequential" },
+          3: { access: "sequential" },
+        },
+      },
+      "S007",
+      [],
+    ).find((x) => !x.done && x.open),
     undefined,
   );
 });

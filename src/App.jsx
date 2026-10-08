@@ -64,6 +64,18 @@ export default function App() {
         </Link>
         <div className="row">
           {store.isDemo() && (
+            <button
+              className="text-button"
+              onClick={() => {
+                store.setSession(null);
+                setUser(null);
+                navigate("/");
+              }}
+            >
+              학생 로그인 체험
+            </button>
+          )}
+          {store.isDemo() && (
             <Status type="warm">미리보기 · 실제 저장 안 됨</Status>
           )}
           {user ? (
@@ -126,6 +138,16 @@ export default function App() {
   );
 }
 function Landing({ user, signed }) {
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const [method, setMethod] = useState(
+    params.has("school") ? "school" : "code",
+  );
+  const [projectCode, setProjectCode] = useState(params.get("school") || "");
+  const [school, setSchool] = useState({
+    grade: "",
+    classroom: "",
+    number: "",
+  });
   const [code, setCode] = useState(
       () =>
         new URLSearchParams(location.hash.split("?")[1] || "").get("code") ||
@@ -138,12 +160,20 @@ function Landing({ user, signed }) {
     setBusy(true);
     setError("");
     try {
-      const s = await store.studentLogin(code);
+      const s =
+        method === "school"
+          ? await store.schoolLogin(
+              projectCode,
+              school.grade,
+              school.classroom,
+              school.number,
+            )
+          : await store.studentLogin(code);
       signed(s);
     } catch (e) {
       setError(
         e.message === "Missing or insufficient permissions."
-          ? "개인코드를 다시 확인해 주세요."
+          ? "입력한 접속정보와 선생님의 로그인 설정을 확인해 주세요."
           : e.message,
       );
     } finally {
@@ -209,25 +239,81 @@ function Landing({ user, signed }) {
           <br />
           이어가 볼까요?
         </h2>
-        <p>선생님께 받은 개인코드를 입력해 주세요.</p>
+        <p>선생님이 안내한 방법으로 들어가요.</p>
         {user ? (
           <Button primary onClick={() => signed(user)}>
             {user.displayName || "연구회원"}로 계속하기 <ArrowRight size={18} />
           </Button>
         ) : (
           <form onSubmit={login}>
-            <Field label="개인코드" hint="접속카드에 있는 코드를 입력해요.">
-              <input
-                className="code-input"
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                autoComplete="off"
-                spellCheck={false}
-                required
-                maxLength={24}
-              />
-            </Field>
+            <div className="choice-cards">
+              <button
+                type="button"
+                aria-pressed={method === "code"}
+                onClick={() => {
+                  setMethod("code");
+                  setError("");
+                }}
+              >
+                개인코드 · QR
+              </button>
+              <button
+                type="button"
+                aria-pressed={method === "school"}
+                onClick={() => {
+                  setMethod("school");
+                  setError("");
+                }}
+              >
+                학년 · 반 · 번호
+              </button>
+            </div>
+            {method === "school" ? (
+              <>
+                <Field
+                  label="프로젝트 입장코드"
+                  hint="선생님이 준 전용 링크로 들어오면 자동 입력돼요."
+                >
+                  <input
+                    required
+                    value={projectCode}
+                    onChange={(e) => setProjectCode(e.target.value)}
+                    autoComplete="off"
+                  />
+                </Field>
+                {[
+                  ["grade", "학년"],
+                  ["classroom", "반"],
+                  ["number", "번호"],
+                ].map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      type="number"
+                      min="1"
+                      max="999"
+                      required
+                      value={school[key]}
+                      onChange={(e) =>
+                        setSchool({ ...school, [key]: e.target.value })
+                      }
+                    />
+                  </Field>
+                ))}
+              </>
+            ) : (
+              <Field label="개인코드" hint="접속카드에 있는 코드를 입력해요.">
+                <input
+                  className="code-input"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
+                  maxLength={24}
+                />
+              </Field>
+            )}
             <ErrorBox error={error} />
             <Button primary busy={busy} type="submit">
               시작하기 <ArrowRight size={18} />
@@ -250,7 +336,9 @@ function Landing({ user, signed }) {
         >
           연구자 로그인 <ArrowUpRight size={16} />
         </button>
-        {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_PREVIEW === "true" || ["localhost", "127.0.0.1"].includes(location.hostname)) && (
+        {(import.meta.env.DEV ||
+          import.meta.env.VITE_ENABLE_PREVIEW === "true" ||
+          ["localhost", "127.0.0.1"].includes(location.hostname)) && (
           <details className="preview-links">
             <summary>개발 미리보기</summary>
             <p>
