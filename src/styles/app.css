@@ -1753,3 +1753,10 @@ footer { position: relative; padding-bottom: 42px; }
 .preview-links summary { cursor: pointer; padding: 4px; min-height: 0; font-size: 10px; list-style: none; }
 .preview-links summary::-webkit-details-marker { display: none; }
 .preview-popover { position: absolute; right: 0; bottom: 100%; width: min(300px, calc(100vw - 48px)); padding: 18px; background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 30px #173e2420; font-size: 13px; z-index: 20; }
+
+.project-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.project-controls:disabled { opacity: .6; }
+.delete-project { border-top: 1px solid #e6c3ba; margin-top: 32px; padding-top: 16px; }
+.delete-project summary { color: #9e3525; font-weight: 700; }
+.delete-project .btn { margin-top: 16px; }
+.btn.danger { background: #a63727; color: white; border-color: #a63727; }

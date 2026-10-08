@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import { deleteProjectData } from "../src/services/deleteProject.js";
 import test, { before, after, beforeEach } from "node:test";
 import fs from "node:fs";
 import {
@@ -12,6 +14,7 @@ import {
   getDocs,
   collection,
   updateDoc,
+  deleteDoc,
   writeBatch,
   serverTimestamp,
   query,
@@ -461,4 +464,71 @@ test("malformed and incomplete submitted surveys rejected", async () => {
       data: { raw: { A1: 6 } },
     }),
   );
+});
+
+
+test("project deletion requires an administrator, a matching name and a deletion lock", async () => {
+  await updateDoc(doc(admin(), "projects", "p"), { name: "삭제 테스트" });
+  await assertFails(deleteDoc(doc(admin(), "projects", "p")));
+  await assertFails(deleteDoc(doc(admin(), "projects", "p", "records", "S001_survey_PRE")));
+  await assertFails(deleteProjectData(anon("a"), "p", "삭제 테스트"));
+  await assert.rejects(deleteProjectData(admin(), "p", "wrong"), /프로젝트 이름/);
+  assert.equal((await getDoc(doc(admin(), "projects", "p"))).data().deleting, undefined);
+});
+
+test("deleting projects block new writes, new student bindings, reopening and student deletion", async () => {
+  const d = admin();
+  await updateDoc(doc(d, "projects", "p"), { deleting: true, archived: true });
+  await assertFails(updateDoc(doc(d, "projects", "p"), { deleting: false, archived: false }));
+  await assertFails(setDoc(doc(d, "projects", "p", "participants", "S003"), { active: true }));
+  await assertFails(setDoc(doc(d, "projects", "p", "validity_reviews", "new"), { value: 1 }));
+  await assertFails(setDoc(doc(d, "access", "c".repeat(64)), { project_id: "p" }));
+  await assertFails(setDoc(doc(anon("new"), "bindings", "new"), {
+    project_id: "p", participant_id: "S001", tokenVersion: 1, codeHash: "a".repeat(64),
+  }));
+  await assertFails(getDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")));
+  await assertFails(deleteDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")));
+  await assertFails(deleteDoc(doc(d, "projects", "q")));
+  await assertFails(getDocs(query(collection(d, "bindings"), where("project_id", "==", "q"))));
+});
+
+test("complete deletion drains multiple batches, revisions and all login mappings without touching another project", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const d = ctx.firestore();
+    const batch = writeBatch(d);
+    batch.update(doc(d, "projects", "p"), { name: "삭제 테스트" });
+    for (let i = 0; i < 205; i++)
+      batch.set(doc(d, "projects", "p", "records", "S001_survey_PRE", "revisions", String(i)), { before: { test: i } });
+    for (const path of [
+      "projects/p/teacher_codings/r", "projects/p/teacher_codings/r/revisions/1",
+      "projects/p/private_settings/login", "projects/p/validity_reviews/v",
+      "school_access/old-hash", "school_projects/short-hash", "access/stale-hash",
+    ]) batch.set(doc(d, path), { project_id: "p" });
+    for (const name of ["access", "school_access", "school_projects", "bindings"])
+      batch.set(doc(d, name, "unrelated"), { project_id: "q" });
+    await batch.commit();
+  });
+  const progress = [];
+  await assertSucceeds(deleteProjectData(admin(), "p", "삭제 테스트", (n) => progress.push(n)));
+  assert.ok(progress.at(-1) > 205);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const d = ctx.firestore();
+    assert.equal((await getDoc(doc(d, "projects", "p"))).exists(), false);
+    for (const path of ["records", "participants", "private_roster", "private_settings", "validity_reviews", "teacher_codings", "records/S001_survey_PRE/revisions", "teacher_codings/r/revisions"])
+      assert.equal((await getDocs(collection(d, "projects/p/" + path))).size, 0, path);
+    for (const name of ["access", "school_access", "school_projects", "bindings"]) {
+      assert.equal((await getDocs(query(collection(d, name), where("project_id", "==", "p")))).size, 0, name);
+      assert.equal((await getDoc(doc(d, name, "unrelated"))).exists(), true);
+    }
+    assert.equal((await getDoc(doc(d, "projects", "q"))).exists(), true);
+  });
+  await assertSucceeds(deleteProjectData(admin(), "p", "삭제 테스트"));
+});
+
+test("interrupted deletion keeps the lock and resumes", async () => {
+  await updateDoc(doc(admin(), "projects", "p"), { name: "재시도" });
+  await assert.rejects(deleteProjectData(admin(), "p", "재시도", () => { throw Error("connection lost"); }), /connection lost/);
+  assert.equal((await getDoc(doc(admin(), "projects", "p"))).data().deleting, true);
+  await assertSucceeds(deleteProjectData(admin(), "p", "재시도"));
+  assert.equal((await getDoc(doc(admin(), "projects", "p"))).exists(), false);
 });

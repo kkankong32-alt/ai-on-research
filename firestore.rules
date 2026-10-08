@@ -4,18 +4,21 @@ service cloud.firestore {
   function signed(){return request.auth != null;}
   function admin(){return signed() && request.auth.token.firebase.sign_in_provider == 'google.com' && request.auth.token.email_verified == true && get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.active == true;}
   function superAdmin(){return admin() && get(/databases/$(database)/documents/admins/$(request.auth.token.email)).data.role == 'SUPER_ADMIN';}
+  function mutable(pid){return get(/databases/$(database)/documents/projects/$(pid)).data.get('deleting',false)==false;}
+  function deleting(pid){return admin() && get(/databases/$(database)/documents/projects/$(pid)).data.get('deleting',false)==true;}
   function binding(){return get(/databases/$(database)/documents/bindings/$(request.auth.uid)).data;}
   function schoolEnabled(b){return get(/databases/$(database)/documents/projects/$(b.project_id)).data.get('schoolLoginEnabled',false) && get(/databases/$(database)/documents/school_access/$(b.codeHash)).data.participant_id==b.participant_id && get(/databases/$(database)/documents/school_access/$(b.codeHash)).data.project_id==b.project_id;}
-  function student(pid,sid){return signed() && binding().project_id == pid && binding().participant_id == sid && (binding().get('loginMethod','code')!='school' || schoolEnabled(binding())) && get(/databases/$(database)/documents/projects/$(pid)/participants/$(sid)).data.active == true && binding().tokenVersion == get(/databases/$(database)/documents/projects/$(pid)/participants/$(sid)).data.tokenVersion && get(/databases/$(database)/documents/projects/$(pid)).data.archived == false;}
+  function student(pid,sid){return mutable(pid) && signed() && binding().project_id == pid && binding().participant_id == sid && (binding().get('loginMethod','code')!='school' || schoolEnabled(binding())) && get(/databases/$(database)/documents/projects/$(pid)/participants/$(sid)).data.active == true && binding().tokenVersion == get(/databases/$(database)/documents/projects/$(pid)/participants/$(sid)).data.tokenVersion && get(/databases/$(database)/documents/projects/$(pid)).data.archived == false;}
   match /admins/{email}{allow get: if admin() || (signed() && request.auth.token.email == email);allow list: if superAdmin();allow create,update: if superAdmin() && email != request.auth.token.email && request.resource.data.role == 'ADMIN' && request.resource.data.active is bool;allow delete: if false;}
-  match /access/{hash}{allow get: if signed();allow list: if false;allow create,update,delete: if admin();}
-  match /school_access/{hash}{allow get: if admin() || (signed() && get(/databases/$(database)/documents/projects/$(resource.data.project_id)).data.get('schoolLoginEnabled',false));allow list: if false;allow create,update,delete: if admin();}
-  match /school_projects/{hash}{allow get: if admin() || (signed() && get(/databases/$(database)/documents/projects/$(resource.data.project_id)).data.get('schoolLoginEnabled',false));allow list: if false;allow create,update,delete: if admin();}
+  match /access/{hash}{allow get: if signed();allow list: if deleting(resource.data.project_id);allow create,update: if admin() && mutable(request.resource.data.project_id);allow delete: if admin();}
+  match /school_access/{hash}{allow get: if admin() || (signed() && get(/databases/$(database)/documents/projects/$(resource.data.project_id)).data.get('schoolLoginEnabled',false));allow list: if deleting(resource.data.project_id);allow create,update: if admin() && mutable(request.resource.data.project_id);allow delete: if admin();}
+  match /school_projects/{hash}{allow get: if admin() || (signed() && get(/databases/$(database)/documents/projects/$(resource.data.project_id)).data.get('schoolLoginEnabled',false));allow list: if deleting(resource.data.project_id);allow create,update: if admin() && mutable(request.resource.data.project_id);allow delete: if admin();}
   match /bindings/{uid}{
    function target(){let b=request.resource.data;return b.get('loginMethod','code')=='school' ? get(/databases/$(database)/documents/school_access/$(b.codeHash)).data : get(/databases/$(database)/documents/access/$(b.codeHash)).data;}
    allow get: if signed() && request.auth.uid==uid;
-   allow list,delete: if false;
+   allow list,delete: if deleting(resource.data.project_id);
    allow create,update: if signed() && request.auth.uid==uid && request.auth.token.firebase.sign_in_provider=='anonymous'
+    && mutable(request.resource.data.project_id)
     && request.resource.data.keys().hasOnly(['project_id','participant_id','tokenVersion','codeHash','loginMethod'])
     && request.resource.data.get('loginMethod','code') in ['code','school']
     && (request.resource.data.get('loginMethod','code')!='school' || schoolEnabled(request.resource.data))
@@ -25,11 +28,12 @@ service cloud.firestore {
     && target().tokenVersion==request.resource.data.tokenVersion;
   }
   match /projects/{pid}{
-   match /private_settings/{id}{allow read,write: if admin();}
+   match /{child}/{rest=**}{allow delete: if deleting(pid);}
+   match /private_settings/{id}{allow read: if admin();allow create,update: if admin() && mutable(pid);allow delete: if deleting(pid);}
    allow get: if admin() || student(pid,binding().participant_id);
-   allow list,create,update: if admin();allow delete: if false;
-   match /participants/{sid}{allow get: if admin() || student(pid,sid);allow list,create,update: if admin();allow delete: if false;}
-   match /private_roster/{sid}{allow read,create,update: if admin();allow delete: if false;}
+   allow list: if admin();allow create: if admin() && request.resource.data.get('deleting',false)==false;allow update: if admin() && mutable(pid) && (request.resource.data.get('deleting',false)==false || request.resource.data.archived==true);allow delete: if deleting(pid);
+   match /participants/{sid}{allow get: if admin() || student(pid,sid);allow list: if admin();allow create,update: if admin() && mutable(pid);allow delete: if deleting(pid);}
+   match /private_roster/{sid}{allow read: if admin();allow create,update: if admin() && mutable(pid);allow delete: if deleting(pid);}
    match /records/{rid}{
     function surveyValid(d){let r=d.data.raw;return d.data.keys().hasOnly(['raw','derived']) && r is map && r.keys().hasOnly(['A1','A2','A3','A4','A5','A6','B1','B2','B3','B4','B5','B6','C1','C2','C3','C4','C5','C6','D1','D2','D3','D4','D5','E1','E2','E3','E4','E5']) && (d.status=='draft'||r.keys().hasAll(['A1','A2','A3','A4','A5','A6','B1','B2','B3','B4','B5','B6','C1','C2','C3','C4','C5','C6','D1','D2','D3','D4','D5','E1','E2','E3','E4','E5'])) && r.values().hasOnly([1,2,3,4,5]);}
     function textValue(v){return v is string && v.size()<=20000;}
@@ -39,22 +43,22 @@ service cloud.firestore {
     function history(){return getAfter(/databases/$(database)/documents/projects/$(pid)/records/$(rid)/revisions/$(string(resource.data.revision))).data.before==resource.data;}
     allow get,list: if admin() || student(pid,resource.data.participant_id);
     allow create: if student(pid,request.resource.data.participant_id) && payload() && request.resource.data.revision==1 && request.resource.data.createdAt==request.time;
-    allow update: if (student(pid,resource.data.participant_id) && resource.data.status=='draft' && request.resource.data.participant_id==resource.data.participant_id && payload() && request.resource.data.createdAt==resource.data.createdAt && request.resource.data.revision==resource.data.revision+1 && history()) || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','revision','updatedAt','submittedAt']) && request.resource.data.status=='draft' && request.resource.data.submittedAt==null && request.resource.data.updatedAt==request.time && request.resource.data.revision==resource.data.revision+1 && history());
+    allow update: if (student(pid,resource.data.participant_id) && resource.data.status=='draft' && request.resource.data.participant_id==resource.data.participant_id && payload() && request.resource.data.createdAt==resource.data.createdAt && request.resource.data.revision==resource.data.revision+1 && history()) || (admin() && mutable(pid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','revision','updatedAt','submittedAt']) && request.resource.data.status=='draft' && request.resource.data.submittedAt==null && request.resource.data.updatedAt==request.time && request.resource.data.revision==resource.data.revision+1 && history());
     allow delete: if false;
     match /revisions/{rev}{
      allow read: if admin();
-     allow create: if (admin() || student(pid,get(/databases/$(database)/documents/projects/$(pid)/records/$(rid)).data.participant_id)) && request.resource.data.keys().hasOnly(['before','changedBy','changedAt','reason']) && request.resource.data.before==get(/databases/$(database)/documents/projects/$(pid)/records/$(rid)).data && rev==string(request.resource.data.before.revision) && request.resource.data.changedBy==request.auth.uid && request.resource.data.changedAt==request.time;
+     allow create: if mutable(pid) && (admin() || student(pid,get(/databases/$(database)/documents/projects/$(pid)/records/$(rid)).data.participant_id)) && request.resource.data.keys().hasOnly(['before','changedBy','changedAt','reason']) && request.resource.data.before==get(/databases/$(database)/documents/projects/$(pid)/records/$(rid)).data && rev==string(request.resource.data.before.revision) && request.resource.data.changedBy==request.auth.uid && request.resource.data.changedAt==request.time;
      allow update,delete: if false;
     }
    }
    match /teacher_codings/{rid}{
     allow read: if admin();
-    allow create: if admin() && request.resource.data.revision==1 && request.resource.data.updatedBy==request.auth.uid && request.resource.data.updatedAt==request.time;
-    allow update: if admin() && request.resource.data.revision==resource.data.revision+1 && request.resource.data.updatedBy==request.auth.uid && request.resource.data.updatedAt==request.time && getAfter(/databases/$(database)/documents/projects/$(pid)/teacher_codings/$(rid)/revisions/$(string(resource.data.revision))).data.before==resource.data;
+    allow create: if admin() && mutable(pid) && request.resource.data.revision==1 && request.resource.data.updatedBy==request.auth.uid && request.resource.data.updatedAt==request.time;
+    allow update: if admin() && mutable(pid) && request.resource.data.revision==resource.data.revision+1 && request.resource.data.updatedBy==request.auth.uid && request.resource.data.updatedAt==request.time && getAfter(/databases/$(database)/documents/projects/$(pid)/teacher_codings/$(rid)/revisions/$(string(resource.data.revision))).data.before==resource.data;
     allow delete: if false;
-    match /revisions/{rev}{allow read: if admin();allow create: if admin() && request.resource.data.before==get(/databases/$(database)/documents/projects/$(pid)/teacher_codings/$(rid)).data && rev==string(request.resource.data.before.revision) && request.resource.data.changedBy==request.auth.uid && request.resource.data.changedAt==request.time;allow update,delete: if false;}
+    match /revisions/{rev}{allow read: if admin();allow create: if admin() && mutable(pid) && request.resource.data.before==get(/databases/$(database)/documents/projects/$(pid)/teacher_codings/$(rid)).data && rev==string(request.resource.data.before.revision) && request.resource.data.changedBy==request.auth.uid && request.resource.data.changedAt==request.time;allow update,delete: if false;}
    }
-   match /validity_reviews/{id}{allow read,create,update: if admin();allow delete: if false;}
+   match /validity_reviews/{id}{allow read: if admin();allow create,update: if admin() && mutable(pid);allow delete: if deleting(pid);}
   }
  }
 }

@@ -126,7 +126,7 @@ function ProjectList() {
       <ErrorBox error={error} />
       <div className="project-grid">
         {projects
-          .filter((p) => archived || !p.archived)
+          .filter((p) => p.deleting || archived || !p.archived)
           .map((p) => (
             <ProjectCard key={p.id} p={p} />
           ))}
@@ -164,7 +164,7 @@ function ProjectCard({ p }) {
           <FolderOpen size={23} />
         </span>
         <Status type={p.archived ? "" : "green"}>
-          {p.archived ? "보관됨" : "진행 중"}
+          {p.deleting ? "삭제 진행 중" : p.archived ? "보관됨" : "진행 중"}
         </Status>
       </div>
       <h2>{p.name}</h2>
@@ -562,7 +562,7 @@ function ProjectForm({ original, onSaved }) {
 }
 function ProjectView() {
   const { pid } = useParams(),
-    [project, setProject] = useState(null),
+    [project, setProject] = useState(undefined),
     [tab, setTab] = useState("progress"),
     [selected, setSelected] = useState(null),
     [error, setError] = useState("");
@@ -583,7 +583,8 @@ function ProjectView() {
     [pid],
   );
   const codings = Object.fromEntries(codingList.map((c) => [c.id, c]));
-  if (!project) return <p>프로젝트를 불러오는 중입니다…</p>;
+  if (project === undefined) return <p>프로젝트를 불러오는 중입니다…</p>;
+  if (!project) return <><p>삭제되었거나 존재하지 않는 프로젝트입니다.</p><Link to="/admin">프로젝트 목록으로</Link></>;
   const tabs = [
     ["progress", "진행현황"],
     ["timeline", "학생 기록"],
@@ -615,6 +616,7 @@ function ProjectView() {
           <button
             key={k}
             className={tab === k ? "active" : ""}
+            disabled={project.deleting && k !== "settings"}
             onClick={() => setTab(k)}
           >
             {n}
@@ -622,6 +624,7 @@ function ProjectView() {
         ))}
       </div>
       <ErrorBox error={error || pe || re || ce} />
+      {project.deleting && <div role="status" className="notice error">삭제가 시작된 프로젝트입니다. 새 기록은 저장되지 않습니다. 중단된 경우 설정에서 완전 삭제를 다시 실행하세요.</div>}
       {tab === "progress" ? (
         <ProgressTable
           p={project}
@@ -652,7 +655,7 @@ function ProjectView() {
         />
       ) : tab === "settings" ? (
         <>
-          <ProjectForm original={project} onSaved={() => setTab("progress")} />
+          <fieldset disabled={!!project.deleting} className="project-controls"><ProjectForm original={project} onSaved={() => setTab("progress")} /></fieldset>
           <ProjectActions p={project} />
         </>
       ) : tab === "charts" ? (
@@ -1465,6 +1468,7 @@ function ProjectActions({ p }) {
   return (
     <section className="card narrow">
       <h2>운영 설정</h2>
+      <fieldset disabled={!!p.deleting} className="project-controls">
       <h3>차시 열기와 잠금</h3>
       <p>
         기본은 자유 진행입니다. 학생이 원하는 차시부터 기록할 수 있습니다.
@@ -1571,7 +1575,9 @@ function ProjectActions({ p }) {
         <Copy size={16} /> 설정만 복제
       </Button>
       <p>기존 학생과 연구자료는 복사하지 않습니다.</p>
+      </fieldset>
       <p role="status">{msg}</p>
+      <DeleteProjectControl p={p} />
     </section>
   );
 }
@@ -1792,5 +1798,43 @@ function Members({ user }) {
       ))}
       <p role="status">{msg}</p>
     </div>
+  );
+}
+
+function DeleteProjectControl({ p }) {
+  const [confirmation, setConfirmation] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState(0);
+  const nav = useNavigate();
+  return (
+    <details className="delete-project" open={p.deleting || undefined}>
+      <summary>프로젝트 완전 삭제</summary>
+      <p><strong>{p.name}</strong>의 서버에 저장된 학생 정보, 검사·성찰·AI 대화 기록, 교사 코딩, 수정이력과 접속정보가 삭제됩니다. 복구할 수 없습니다.</p>
+      {store.isDemo() && <p>현재 미리보기입니다. 예시 자료만 삭제되며 실제 프로젝트에는 영향을 주지 않습니다.</p>}
+      <p>필요한 자료는 먼저 ‘자료 내보내기’에서 내려받으세요.</p>
+      <form onSubmit={async (e) => {
+        e.preventDefault();
+        if (busy || confirmation !== p.name || !acknowledged) return;
+        setBusy(true); setError("");
+        try {
+          await store.deleteProject(p.id, confirmation, setProgress);
+          nav("/admin", { replace: true });
+        } catch (e) {
+          setError(`삭제를 완료하지 못했습니다. 연결을 확인한 뒤 다시 실행해 주세요. ${e.message}`);
+        } finally { setBusy(false); }
+      }}>
+        <Field label="삭제할 프로젝트 이름 확인" hint={`프로젝트 이름: ${p.name} (동일하게 입력)`}>
+          <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} disabled={busy} autoComplete="off" />
+        </Field>
+        <label className="check-label"><input type="checkbox" checked={acknowledged} disabled={busy} onChange={(e) => setAcknowledged(e.target.checked)} />자료가 영구 삭제되며 복구할 수 없음을 확인했습니다.</label>
+        <ErrorBox error={error} />
+        <Button type="submit" className="btn danger" busy={busy} disabled={confirmation !== p.name || !acknowledged}>
+          {p.deleting ? "남은 자료 완전 삭제" : "프로젝트 영구 삭제"}
+        </Button>
+        {busy && <p role="status">삭제 중… {progress}개 문서 처리. 완료될 때까지 화면을 닫지 마세요.</p>}
+      </form>
+    </details>
   );
 }

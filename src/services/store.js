@@ -20,6 +20,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { auth, db, configured } from "./firebase.js";
+import { deleteProjectData } from "./deleteProject.js";
 import {
   hashCode,
   newCode,
@@ -212,7 +213,7 @@ export function watchProjects(cb, err) {
 }
 export function watchProject(id, cb, err) {
   if (demo) {
-    const f = () => cb({ ...memory.projects.find((p) => p.id === id) });
+    const f = () => cb(memory.projects.find((p) => p.id === id) || null);
     f();
     listeners.add(f);
     return () => listeners.delete(f);
@@ -716,4 +717,21 @@ export async function backup(pid) {
     );
   }
   return result;
+}
+
+export async function deleteProject(pid, confirmation, onProgress) {
+  if (!["ADMIN", "SUPER_ADMIN"].includes(session?.role))
+    throw Error("연구자 로그인 후 사용할 수 있습니다.");
+  if (demo) {
+    const project = memory.projects.find((p) => p.id === pid);
+    if (!project) return;
+    if (confirmation !== project.name)
+      throw Error("프로젝트 이름을 정확히 입력해 주세요.");
+    memory.projects = memory.projects.filter((p) => p.id !== pid);
+    for (const key of ["participants", "records", "codings", "roster", "reviews", "login"])
+      delete memory[key][pid];
+    emit();
+    return;
+  }
+  await deleteProjectData(db, pid, confirmation, onProgress);
 }
