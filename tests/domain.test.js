@@ -121,7 +121,7 @@ test("pre and post task gates, optional journals, delayed manual", () => {
     },
   };
   let t = tasksFor(p, "S007", []);
-  assert.equal(t[1].open, false);
+  assert.equal(t[1].open, true);
   assert.equal(t[2].open, false);
   t = tasksFor(p, "S007", [
     { id: "S007_survey_PRE", status: "submitted" },
@@ -157,7 +157,7 @@ test("per-session overrides omit disabled activities and retain stable identitie
     tasks.map((t) => [t.kind, t.unit, t.open]),
     [
       ["journal", "2", true],
-      ["prompt", "3", false],
+      ["prompt", "3", true],
     ],
   );
   assert.equal(tasksFor({ ...p, sessionCount: 2 }, "S007", []).length, 1);
@@ -166,7 +166,7 @@ test("sequential sessions require all enabled earlier activities and skip disabl
   const p = {
     sessionCount: 3,
     enabled: { PRE: true, journal: true, prompt: true },
-    sessions: { 2: { prompt: false } },
+    sessions: { 1: {access: "sequential"}, 2: { prompt: false, access: "sequential" }, 3: {access: "sequential"} },
   };
   const records = ["survey_PRE", "journal_1"].map((id) => ({
     id: `S007_${id}`,
@@ -188,7 +188,7 @@ test("manual open bypasses earlier incomplete sessions; explicit lock overrides 
   const p = {
     sessionCount: 3,
     enabled: { journal: true },
-    sessions: { 1: { access: "locked" }, 3: { access: "open" } },
+    sessions: { 1: { access: "locked" }, 2: {access: "sequential"}, 3: { access: "open" } },
   };
   const t = tasksFor(p, "S007", []);
   assert.deepEqual(
@@ -197,7 +197,7 @@ test("manual open bypasses earlier incomplete sessions; explicit lock overrides 
   );
   assert.equal(t.find((x) => !x.done && x.open).unit, "3");
   assert.equal(
-    tasksFor({ ...p, sessions: { 1: { access: "locked" } } }, "S007", []).find(
+    tasksFor({ ...p, sessions: { 1: { access: "locked" }, 2: {access: "sequential"}, 3: {access: "sequential"} } }, "S007", []).find(
       (x) => !x.done && x.open,
     ),
     undefined,

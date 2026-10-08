@@ -179,8 +179,8 @@ export function tasksFor(project, sid, records) {
   for (let i = 1; i <= project.sessionCount; i++) {
     const settings = sessionSettings(project, i);
     const open =
-      settings.access === "open" ||
-      (settings.access !== "locked" && out.every((t) => t.done));
+      settings.access !== "locked" &&
+      (settings.access !== "sequential" || out.every((t) => t.done));
     for (const kind of ["journal", "prompt"])
       if (settings[kind])
         out.push({

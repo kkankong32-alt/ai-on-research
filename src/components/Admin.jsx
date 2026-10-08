@@ -1268,8 +1268,8 @@ function ProjectActions({ p }) {
       <h2>운영 설정</h2>
       <h3>차시 열기와 잠금</h3>
       <p>
-        순차 진행은 사전검사와 앞 차시의 사용 활동을 완료하면 열립니다. 수동
-        열기는 앞 활동을 완료하지 않아도 해당 차시를 엽니다.
+        기본은 자유 진행입니다. 학생이 원하는 차시부터 기록할 수 있습니다.
+        필요한 차시만 잠그거나 순차 진행으로 바꿀 수 있습니다.
       </p>
       {Array.from({ length: p.sessionCount }, (_, i) => i + 1).map((n) => (
         <Field key={n} label={`${n}차시 진행 방식`}>
@@ -1289,7 +1289,8 @@ function ProjectActions({ p }) {
               }
             }}
           >
-            <option value="auto">순차 진행 (기본)</option>
+            <option value="auto">자유 진행 (기본)</option>
+            <option value="sequential">앞 활동 완료 후 열기</option>
             <option value="open">수동 열기</option>
             <option value="locked">잠금</option>
           </select>
