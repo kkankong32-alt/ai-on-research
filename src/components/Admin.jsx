@@ -1781,7 +1781,7 @@ function Members({ user }) {
           <div>
             <strong>{m.email}</strong>
             <p>
-              {m.role} · {m.active ? "활성" : "비활성"}
+              {m.role === "SUPER_ADMIN" ? "총괄관리자" : "연구회원"} · {m.active ? "로그인 허용됨" : "로그인 차단됨"}
             </p>
           </div>
           {m.role !== "SUPER_ADMIN" && (
@@ -1791,7 +1791,7 @@ function Members({ user }) {
                 load();
               }}
             >
-              {m.active ? "비활성화" : "활성화"}
+              {m.active ? "로그인 차단하기" : "로그인 허용하기"}
             </Button>
           )}
         </section>
