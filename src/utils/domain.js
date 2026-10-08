@@ -151,11 +151,9 @@ export function validateRecord(kind, data, submit) {
     return "빈칸과 오늘의 도전 점수를 확인해 주세요.";
   if (
     kind === "prompt" &&
-    (!data.raw?.trim() ||
-      !data.tool ||
-      !data.turns?.some((t) => t.speaker === "student"))
+    (!data.raw?.trim() || !data.turns?.some((t) => t.speaker === "student"))
   )
-    return "대화와 도구를 입력하고 내 말이 있는지 확인해 주세요.";
+    return "대화를 입력하고 내 말이 있는지 확인해 주세요.";
   if (
     kind === "prompt" &&
     new TextEncoder().encode(JSON.stringify(data)).length > 700000
@@ -163,9 +161,31 @@ export function validateRecord(kind, data, submit) {
     return "대화가 너무 길어요. 원문을 나누어 기록해 주세요.";
   return null;
 }
+export const DEFAULT_SESSION_QUESTIONS = {
+  question: "오늘의 탐구 질문",
+  learned: "오늘 새로 알게 된 것",
+  no_doubt: "오늘 탐구에서 의심하거나 다시 확인한 내용이 있었나요?",
+  doubt: "무엇이 이상하다고 생각했나요?",
+  check: "어떻게 확인했나요?",
+  struggle: "어려웠던 점과 넘은 방법",
+  challenge: "오늘의 도전 점수",
+  mood: "오늘의 마음",
+  next: "다음에 해보고 싶은 것",
+  prompt: "이번 차시 탐구에서 주고받은 AI 대화를 기록해 주세요.",
+};
+export function sessionQuestions(project, number) {
+  const custom = project.sessions?.[String(number)]?.questions || {};
+  return Object.fromEntries(
+    Object.entries(DEFAULT_SESSION_QUESTIONS).map(([k, value]) => [
+      k,
+      custom[k]?.trim() || value,
+    ]),
+  );
+}
 export function sessionSettings(project, number) {
   const custom = project.sessions?.[String(number)] || {};
   return {
+    questions: custom.questions || {},
     journal: custom.journal ?? !!project.enabled.journal,
     prompt: custom.prompt ?? !!project.enabled.prompt,
     access: custom.access || "auto",

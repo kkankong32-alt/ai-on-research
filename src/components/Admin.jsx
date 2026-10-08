@@ -22,6 +22,7 @@ import {
   scoreSurvey,
   phaseNames,
   sessionSettings,
+  DEFAULT_SESSION_QUESTIONS,
 } from "../utils/domain.js";
 import { csv, download, exportRows } from "../utils/export.js";
 import { CODES, RUBRIC } from "../data/codebook.js";
@@ -470,7 +471,7 @@ function ProjectForm({ original, onSaved }) {
                     <strong>{n}차시</strong>
                     {[
                       ["journal", "탐구 돌아보기"],
-                      ["prompt", "AI 대화 기록"],
+                      ["prompt", "AI 사용 및 대화 기록"],
                     ].map(([kind, label]) => (
                       <label className="setting-option" key={kind}>
                         <input
@@ -489,6 +490,50 @@ function ProjectForm({ original, onSaved }) {
                         {n}차시 {label} 사용
                       </label>
                     ))}
+                    <p>
+                      AI를 쓰지 않는 차시는 ‘AI 사용 및 대화 기록’을 끄세요.
+                      학생 여정과 완료 조건에서 제외됩니다.
+                    </p>
+                    <details>
+                      <summary>{n}차시 질문 수정</summary>
+                      <p>
+                        빈칸은 기본 질문을 사용합니다. 이미 작성한 기록은 당시
+                        질문을 보존합니다.
+                      </p>
+                      {Object.entries(DEFAULT_SESSION_QUESTIONS)
+                        .filter(([key]) =>
+                          key === "prompt"
+                            ? sessionSettings(form, n).prompt
+                            : sessionSettings(form, n).journal,
+                        )
+                        .map(([key, fallback]) => (
+                          <Field
+                            key={key}
+                            label={`${n}차시 ${key === "prompt" ? "AI 대화 기록 안내 질문" : fallback}`}
+                          >
+                            <textarea
+                              rows={2}
+                              maxLength={500}
+                              placeholder={fallback}
+                              value={
+                                sessionSettings(form, n).questions[key] || ""
+                              }
+                              onChange={(e) =>
+                                change("sessions", {
+                                  ...form.sessions,
+                                  [n]: {
+                                    ...sessionSettings(form, n),
+                                    questions: {
+                                      ...sessionSettings(form, n).questions,
+                                      [key]: e.target.value,
+                                    },
+                                  },
+                                })
+                              }
+                            />
+                          </Field>
+                        ))}
+                    </details>
                   </div>
                 ),
               )}

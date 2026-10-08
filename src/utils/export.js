@@ -100,6 +100,7 @@ export function exportRows(
         "teacher_meta",
         "teacher_memo",
         "created_at",
+        "questions_json",
       ],
       ...list
         .filter((r) => r.kind === "journal")
@@ -114,6 +115,7 @@ export function exportRows(
           codings[r.id]?.meta,
           codings[r.id]?.memo,
           date(r.createdAt),
+          JSON.stringify(r.data.questions || {}),
         ]),
     ];
   }
@@ -130,6 +132,7 @@ export function exportRows(
         "teacher_code",
         "final_code",
         "created_at",
+        "prompt_question",
       ],
       ...list
         .filter((r) => r.kind === "prompt")
@@ -147,6 +150,7 @@ export function exportRows(
               teacher,
               teacher ?? t.auto_code,
               date(r.createdAt),
+              r.data.questions?.prompt || "",
             ];
           }),
         ),

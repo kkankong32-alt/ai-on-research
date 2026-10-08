@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import * as store from "../services/store.js";
 import { SURVEY } from "../data/instruments.js";
-import { MOODS, TOOLS } from "../data/codebook.js";
+import { MOODS } from "../data/codebook.js";
 import {
   tasksFor,
   recordKey,
@@ -21,6 +21,7 @@ import {
   journalDraft,
   validateRecord,
   scoreSurvey,
+  sessionQuestions,
 } from "../utils/domain.js";
 import {
   Button,
@@ -199,7 +200,7 @@ const initial = (kind) =>
           mood: "",
           next: "",
         }
-      : { tool: "", raw: "", turns: [], note: "" };
+      : { raw: "", turns: [], note: "" };
 function RecordEditor({ user, project, record, kind, unit }) {
   const navigate = useNavigate(),
     key = `aion-draft:${user.uid}:${project.id}:${recordKey(user.participant_id, kind, unit)}`;
@@ -212,8 +213,15 @@ function RecordEditor({ user, project, record, kind, unit }) {
   const staleDraft =
     !!recovered && recovered.baseRevision !== (record?.revision || 0);
   const [data, setData] = useState(
-    recovered?.data || record?.data || initial(kind),
+    recovered?.data ||
+      record?.data || {
+        ...initial(kind),
+        ...(kind !== "survey"
+          ? { questions: sessionQuestions(project, unit) }
+          : {}),
+      },
   );
+  const questions = data.questions || sessionQuestions(project, unit);
   const [page, setPage] = useState(0),
     [status, setStatus] = useState(""),
     [error, setError] = useState(
@@ -282,9 +290,14 @@ function RecordEditor({ user, project, record, kind, unit }) {
       let payload = value;
       if (kind === "survey")
         payload = { ...value, derived: scoreSurvey(value.raw) };
-      if (kind === "journal") payload = { ...value, auto: journalDraft(value) };
+      if (kind === "journal")
+        payload = { ...value, questions, auto: journalDraft(value) };
       if (kind === "prompt")
-        payload = { ...value, rubricDraft: rubricDraft(value.turns) };
+        payload = {
+          ...value,
+          questions,
+          rubricDraft: rubricDraft(value.turns),
+        };
       setStatus("저장 중…");
       try {
         revision.current = await store.saveRecord(
@@ -495,21 +508,19 @@ function RecordEditor({ user, project, record, kind, unit }) {
             {page === 0 ? (
               <>
                 <TextField
-                  label="오늘의 탐구 질문"
-                  hint="내가 알아보려 한 것을 한 문장으로 적어요."
+                  label={questions.question}
                   value={data.question}
                   onChange={(v) => change({ question: v })}
                 />
                 <TextField
-                  label="오늘 새로 알게 된 것"
-                  hint="사실이나 방법, 무엇이든 좋아요."
+                  label={questions.learned}
                   value={data.learned}
                   onChange={(v) => change({ learned: v })}
                 />
               </>
             ) : page === 1 ? (
               <>
-                <h3>AI를 의심하거나 다시 확인한 순간이 있었나요?</h3>
+                <h3>{questions.no_doubt}</h3>
                 <div className="chips">
                   {[
                     [false, "있었어요"],
@@ -527,20 +538,19 @@ function RecordEditor({ user, project, record, kind, unit }) {
                 {data.no_doubt === false && (
                   <>
                     <TextField
-                      label="무엇이 이상하다고 생각했나요?"
+                      label={questions.doubt}
                       value={data.doubt}
                       onChange={(v) => change({ doubt: v })}
                     />
                     <TextField
-                      label="어떻게 확인했나요?"
+                      label={questions.check}
                       value={data.check}
                       onChange={(v) => change({ check: v })}
                     />
                   </>
                 )}
                 <TextField
-                  label="어려웠던 점과 넘은 방법"
-                  hint="막혔던 순간과 해결하려고 해 본 것을 적어요."
+                  label={questions.struggle}
                   value={data.struggle}
                   onChange={(v) => change({ struggle: v })}
                 />
@@ -548,7 +558,7 @@ function RecordEditor({ user, project, record, kind, unit }) {
             ) : (
               <>
                 <Field
-                  label="오늘의 도전 점수"
+                  label={questions.challenge}
                   hint="1 조금 도전했어요 · 5 아주 많이 도전했어요"
                 >
                   <Scale
@@ -558,7 +568,7 @@ function RecordEditor({ user, project, record, kind, unit }) {
                     onChange={(v) => change({ challenge: v })}
                   />
                 </Field>
-                <Field label="오늘의 마음">
+                <Field label={questions.mood}>
                   <div className="chips">
                     {MOODS.map(([m]) => (
                       <button
@@ -580,7 +590,7 @@ function RecordEditor({ user, project, record, kind, unit }) {
                   />
                 </Field>
                 <TextField
-                  label="다음에 해보고 싶은 것"
+                  label={questions.next}
                   value={data.next}
                   onChange={(v) => change({ next: v })}
                 />
@@ -610,20 +620,7 @@ function RecordEditor({ user, project, record, kind, unit }) {
       {kind === "prompt" ? (
         <>
           <section className="card">
-            <Field label="어떤 AI와 이야기했나요?">
-              <div className="chips">
-                {TOOLS.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    aria-pressed={data.tool === t}
-                    onClick={() => change({ tool: t })}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </Field>
+            <h3>{questions.prompt}</h3>
             <Field
               label="대화 전체 붙여넣기"
               hint="이름이나 연락처가 들어 있지 않은지 살펴봐요."
@@ -723,7 +720,13 @@ export function RecordText({ kind, data }) {
         ))}
       </dl>
     );
-  if (kind === "prompt") return <pre className="raw-text">{data.raw}</pre>;
+  if (kind === "prompt")
+    return (
+      <>
+        <p>{data.questions?.prompt}</p>
+        <pre className="raw-text">{data.raw}</pre>
+      </>
+    );
   const labels = {
     question: "오늘의 탐구 질문",
     learned: "오늘 새로 알게 된 것",
@@ -738,11 +741,16 @@ export function RecordText({ kind, data }) {
     <dl className="record-text">
       {Object.entries(labels).map(([k, l]) => (
         <React.Fragment key={k}>
-          <dt>{l}</dt>
+          <dt>{data.questions?.[k] || l}</dt>
           <dd>{data[k] || "—"}</dd>
         </React.Fragment>
       ))}
-      {data.no_doubt && <p>AI를 의심한 순간: 오늘은 없었어요</p>}
+      {data.no_doubt && (
+        <p>
+          {data.questions?.no_doubt || "의심하거나 다시 확인한 내용"}: 오늘은
+          없었어요
+        </p>
+      )}
     </dl>
   );
 }

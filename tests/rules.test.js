@@ -135,6 +135,38 @@ function record(s) {
     submittedAt: null,
   };
 }
+test("submitted dialogue without a tool and with recorded question is accepted", async () => {
+  const r = {
+    ...record("S001"),
+    kind: "prompt",
+    unit: "1",
+    session_id: 1,
+    phase: null,
+    status: "submitted",
+    submittedAt: serverTimestamp(),
+    data: {
+      raw: "나: 관찰 결과를 비교해 줘",
+      turns: [{ speaker: "student", raw_text: "관찰 결과를 비교해 줘" }],
+      note: "",
+      questions: { prompt: "어떤 근거를 확인했나요?" },
+    },
+  };
+  await assertSucceeds(
+    setDoc(doc(anon("a"), "projects", "p", "records", "S001_prompt_1"), r),
+  );
+  await assertSucceeds(
+    updateDoc(doc(admin(), "projects", "p"), {
+      sessions: { 2: { prompt: false } },
+    }),
+  );
+  await assertFails(
+    setDoc(doc(anon("a"), "projects", "p", "records", "S001_prompt_2"), {
+      ...r,
+      unit: "2",
+      session_id: 2,
+    }),
+  );
+});
 test("school login binds same student, isolates peers, and revokes when disabled", async () => {
   const hash = "c".repeat(64);
   const link = { project_id: "p", participant_id: "S001", tokenVersion: 1 };

@@ -11,9 +11,45 @@ import {
   validateRecord,
   tasksFor,
   schoolLoginKey,
+  sessionQuestions,
+  sessionSettings,
 } from "../src/utils/domain.js";
 import { exportRows, csv } from "../src/utils/export.js";
 import { indices, scaleIndices } from "../src/utils/validity.js";
+test("session questions use defaults, keep overrides and omit AI tasks when disabled", () => {
+  const p = {
+    sessionCount: 2,
+    enabled: { journal: true, prompt: true },
+    sessions: {
+      1: {
+        prompt: false,
+        questions: { question: "오늘 실험에서 바꾼 조건은?", learned: "  " },
+      },
+    },
+  };
+  const q = sessionQuestions(p, 1);
+  assert.equal(q.question, "오늘 실험에서 바꾼 조건은?");
+  assert.equal(q.learned, "오늘 새로 알게 된 것");
+  assert.equal(sessionSettings(p, 1).questions.question, q.question);
+  assert.notEqual(sessionQuestions(p, 2).question, q.question);
+  assert.equal(
+    tasksFor(p, "S001", []).some((t) => t.unit === "1" && t.kind === "prompt"),
+    false,
+  );
+  p.sessions[1].questions.question = "수정한 질문";
+  assert.equal(q.question, "오늘 실험에서 바꾼 조건은?");
+});
+test("AI conversation submission requires dialogue but no tool selection", () => {
+  assert.equal(
+    validateRecord(
+      "prompt",
+      { raw: "나: 관찰을 어떻게 비교할까요?", turns: [{ speaker: "student" }] },
+      true,
+    ),
+    null,
+  );
+  assert.ok(validateRecord("prompt", { raw: "", turns: [] }, true));
+});
 test("school identity is project-scoped, normalized and unambiguous", async () => {
   assert.equal(
     schoolLoginKey("ABCD-EFGH", "05", "02", "07"),
