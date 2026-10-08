@@ -106,14 +106,14 @@ export default function App() {
         </main>
       ) : (
         <Routes>
-          <Route path="/" element={<Landing user={user} signed={signed} />} />
+          <Route path="/" element={<Landing user={user} signed={signed} switchStudent={exit} />} />
           <Route
             path="/student/*"
             element={
               user?.role === "student" ? (
                 <Student user={user} />
               ) : (
-                <Landing user={user} signed={signed} />
+                <Landing user={user} signed={signed} switchStudent={exit} />
               )
             }
           />
@@ -123,24 +123,22 @@ export default function App() {
               user && user.role !== "student" ? (
                 <Admin user={user} />
               ) : (
-                <Landing user={user} signed={signed} />
+                <Landing user={user} signed={signed} switchStudent={exit} />
               )
             }
           />
-          <Route path="*" element={<Landing user={user} signed={signed} />} />
+          <Route path="*" element={<Landing user={user} signed={signed} switchStudent={exit} />} />
         </Routes>
       )}
       <footer>
         <span>AI-ON 과학탐구 기록장</span>
         <span>질문 · 탐구 · 발견 · 성장</span>
+        <PreviewMenu signed={signed} />
       </footer>
     </>
   );
 }
-function Landing({ user, signed }) {
-  const [previewPassword, setPreviewPassword] = useState("");
-  const [previewUnlocked, setPreviewUnlocked] = useState(false);
-  const [previewError, setPreviewError] = useState("");
+function Landing({ user, signed, switchStudent }) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const [method, setMethod] = useState(
     params.has("school") ? "school" : "code",
@@ -244,9 +242,14 @@ function Landing({ user, signed }) {
         </h2>
         <p>선생님이 안내한 방법으로 들어가요.</p>
         {user ? (
-          <Button primary onClick={() => signed(user)}>
-            {user.displayName || "연구회원"}로 계속하기 <ArrowRight size={18} />
-          </Button>
+          <div className="login-actions">
+            <Button primary onClick={user.role === "student" ? () => signed(user) : switchStudent}>
+              {user.role === "student" ? "내 탐구 이어가기" : "학생 로그인"} <ArrowRight size={18} />
+            </Button>
+            <Button onClick={user.role === "student" ? switchStudent : () => signed(user)}>
+              {user.role === "student" ? "다른 학생 로그인" : "연구관리로 돌아가기"}
+            </Button>
+          </div>
         ) : (
           <form onSubmit={login}>
             <div className="choice-cards">
@@ -341,49 +344,7 @@ function Landing({ user, signed }) {
         >
           연구자 로그인 <ArrowUpRight size={16} />
         </button>
-        {(import.meta.env.DEV ||
-          import.meta.env.VITE_ENABLE_PREVIEW === "true" ||
-          ["localhost", "127.0.0.1"].includes(location.hostname)) && (
-          <details className="preview-links">
-            <summary>관리자 체험</summary>
-            {!previewUnlocked ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (previewPassword === "AIONdudwo") {
-                    setPreviewUnlocked(true);
-                    setPreviewPassword("");
-                    setPreviewError("");
-                  } else setPreviewError("체험 암호를 확인해 주세요.");
-                }}
-              >
-                <Field label="체험 암호">
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={previewPassword}
-                    onChange={(e) => setPreviewPassword(e.target.value)}
-                  />
-                </Field>
-                <Button type="submit">체험 열기</Button>
-                <ErrorBox error={previewError} />
-              </form>
-            ) : (
-              <>
-                <p>
-                  실제 학생 정보는 입력하지 마세요. 새로고침하면 미리보기 기록이
-                  사라집니다.
-                </p>
-                <Button onClick={() => signed(store.preview("student"))}>
-                  학생 화면 보기
-                </Button>
-                <Button onClick={() => signed(store.preview())}>
-                  연구관리 화면 보기
-                </Button>
-              </>
-            )}
-          </details>
-        )}
+
       </section>
     </main>
   );
@@ -404,4 +365,57 @@ function friendlyError(e) {
       "접근 권한을 확인해 주세요. 개인코드가 변경됐을 수 있습니다.",
   };
   return messages[e.code] || e.message;
+}
+
+function PreviewMenu({ signed }) {
+  const [previewPassword, setPreviewPassword] = useState("");
+  const [previewUnlocked, setPreviewUnlocked] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  return (<>
+        {(import.meta.env.DEV ||
+          import.meta.env.VITE_ENABLE_PREVIEW === "true" ||
+          ["localhost", "127.0.0.1"].includes(location.hostname)) && (
+          <details className="preview-links">
+            <summary>미리보기</summary>
+            <div className="preview-popover">
+            {!previewUnlocked ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (previewPassword === "AIONdudwo") {
+                    setPreviewUnlocked(true);
+                    setPreviewPassword("");
+                    setPreviewError("");
+                  } else setPreviewError("미리보기 암호를 확인해 주세요.");
+                }}
+              >
+                <Field label="미리보기 암호">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={previewPassword}
+                    onChange={(e) => setPreviewPassword(e.target.value)}
+                  />
+                </Field>
+                <Button type="submit">미리보기 열기</Button>
+                <ErrorBox error={previewError} />
+              </form>
+            ) : (
+              <>
+                <p>
+                  실제 학생 정보는 입력하지 마세요. 새로고침하면 미리보기 기록이
+                  사라집니다.
+                </p>
+                <Button onClick={() => signed(store.preview("student"))}>
+                  학생 화면 보기
+                </Button>
+                <Button onClick={() => signed(store.preview())}>
+                  연구관리 화면 보기
+                </Button>
+              </>
+            )}
+            </div>
+          </details>
+        )}
+  </>);
 }
