@@ -9,7 +9,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import * as store from "../services/store.js";
-import { SURVEY } from "../data/instruments.js";
+import {
+  surveyFor,
+  questionIdsFor,
+  instrumentVersion,
+  itemLabel,
+  LATEST_INSTRUMENT_VERSION,
+} from "../data/instruments.js";
 import { MOODS } from "../data/codebook.js";
 import {
   tasksFor,
@@ -22,6 +28,7 @@ import {
   validateRecord,
   scoreSurvey,
   sessionQuestions,
+  sessionSettings,
 } from "../utils/domain.js";
 import {
   Button,
@@ -202,6 +209,9 @@ const initial = (kind) =>
         }
       : { raw: "", turns: [], note: "" };
 function RecordEditor({ user, project, record, kind, unit }) {
+  const version = instrumentVersion(record || project);
+  const SURVEY = surveyFor(version);
+  const ids = questionIdsFor(version);
   const navigate = useNavigate(),
     key = `aion-draft:${user.uid}:${project.id}:${recordKey(user.participant_id, kind, unit)}`;
   const [recovered] = useState(() => {
@@ -289,7 +299,7 @@ function RecordEditor({ user, project, record, kind, unit }) {
       const value = current.current;
       let payload = value;
       if (kind === "survey")
-        payload = { ...value, derived: scoreSurvey(value.raw) };
+        payload = { ...value, derived: scoreSurvey(value.raw, version) };
       if (kind === "journal")
         payload = { ...value, questions, auto: journalDraft(value) };
       if (kind === "prompt")
@@ -354,7 +364,7 @@ function RecordEditor({ user, project, record, kind, unit }) {
   }, []);
   async function submit() {
     setError("");
-    const e = validateRecord(kind, current.current, true);
+    const e = validateRecord(kind, current.current, true, version);
     if (e) {
       setError(e);
       return;
@@ -396,7 +406,11 @@ function RecordEditor({ user, project, record, kind, unit }) {
         </section>
         <details className="card">
           <summary>내가 남긴 기록 보기</summary>
-          <RecordText kind={kind} data={record?.data || data} />
+          <RecordText
+            kind={kind}
+            data={record?.data || data}
+            version={version}
+          />
         </details>
       </main>
     );
@@ -448,16 +462,28 @@ function RecordEditor({ user, project, record, kind, unit }) {
       )}
       {kind === "survey" ? (
         <>
-          <Progress value={Object.keys(data.raw).length} max={28} />
-          <div className="section-label">{page + 1} / 5 · 나의 생각</div>
+          <Progress
+            value={
+              ids.filter(
+                (id) =>
+                  Number.isInteger(data.raw[id]) &&
+                  data.raw[id] >= 1 &&
+                  data.raw[id] <= 5,
+              ).length
+            }
+            max={ids.length}
+          />
+          <div className="section-label">
+            {page + 1} / {SURVEY.length} · 나의 생각
+          </div>
           {SURVEY[page].items.map(([id, text]) => (
             <section className="question-card" key={id}>
               <h3>
-                <span>{id}</span>
+                <span>{itemLabel(id, version)}</span>
                 {text.replace(/^\(역채점\) /, "")}
               </h3>
               <Scale
-                label={id}
+                label={itemLabel(id, version)}
                 value={data.raw[id]}
                 onChange={(n) => change({ raw: { ...data.raw, [id]: n } })}
               />
@@ -482,14 +508,14 @@ function RecordEditor({ user, project, record, kind, unit }) {
                   setError("아직 답하지 않은 문항을 골라 주세요.");
                   return;
                 }
-                if (page < 4) {
+                if (page < SURVEY.length - 1) {
                   setPage(page + 1);
                   setError("");
                   window.scrollTo(0, 0);
                 } else submit();
               }}
             >
-              {page < 4 ? "다음으로" : "내 생각 제출하기"}{" "}
+              {page < SURVEY.length - 1 ? "다음으로" : "내 생각 제출하기"}{" "}
               <ArrowRight size={18} />
             </Button>
           </div>
@@ -521,6 +547,13 @@ function RecordEditor({ user, project, record, kind, unit }) {
             ) : page === 1 ? (
               <>
                 <h3>{questions.no_doubt}</h3>
+                {version === LATEST_INSTRUMENT_VERSION && (
+                  <p className="muted">
+                    {sessionSettings(project, unit).prompt
+                      ? "AI 답을 ___라고 의심해서(확인이 필요해서) ___로 확인했다"
+                      : "탐구에서 ___의 확인이 필요해서 ___로 확인했다"}
+                  </p>
+                )}
                 <div className="chips">
                   {[
                     [false, "있었어요"],
@@ -706,18 +739,20 @@ function TextField({ label, hint, value, onChange }) {
     </Field>
   );
 }
-export function RecordText({ kind, data }) {
+export function RecordText({ kind, data, version }) {
   if (kind === "survey")
     return (
       <dl className="record-text">
-        {SURVEY.flatMap((s) => s.items).map(([id, text]) => (
-          <React.Fragment key={id}>
-            <dt>
-              {id} {text.replace(/^\(역채점\) /, "")}
-            </dt>
-            <dd>{data.raw[id]}점</dd>
-          </React.Fragment>
-        ))}
+        {surveyFor(version)
+          .flatMap((s) => s.items)
+          .map(([id, text]) => (
+            <React.Fragment key={id}>
+              <dt>
+                {itemLabel(id, version)} {text.replace(/^\(역채점\) /, "")}
+              </dt>
+              <dd>{data.raw[id]}점</dd>
+            </React.Fragment>
+          ))}
       </dl>
     );
   if (kind === "prompt")

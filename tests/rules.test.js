@@ -139,29 +139,157 @@ function record(s) {
     submittedAt: null,
   };
 }
+test("revised 26 item submission succeeds; retired or missing items and wrong versions fail", async () => {
+  const v2 = "ai-on-feedback-2026-v2";
+  await env.withSecurityRulesDisabled(async (c) =>
+    updateDoc(doc(c.firestore(), "projects", "p"), { instrumentVersion: v2 }),
+  );
+  const data = {
+    ...record("S001"),
+    unit: "POST",
+    phase: "POST",
+    status: "submitted",
+    submittedAt: serverTimestamp(),
+    instrumentVersion: v2,
+  };
+  delete data.data.raw.A5;
+  delete data.data.raw.D1;
+  const ref = doc(anon("a"), "projects", "p", "records", "S001_survey_POST");
+  await assertFails(
+    setDoc(ref, { ...data, instrumentVersion: "ai-on-report-2026-v1" }),
+  );
+  await assertFails(
+    setDoc(ref, { ...data, data: { raw: { ...data.data.raw, A5: 3 } } }),
+  );
+  await assertFails(
+    setDoc(ref, { ...data, data: { raw: { ...data.data.raw, D1: 3 } } }),
+  );
+  const missing = { ...data.data.raw };
+  delete missing.A6;
+  await assertFails(setDoc(ref, { ...data, data: { raw: missing } }));
+  await assertFails(
+    setDoc(ref, { ...data, data: { raw: { ...data.data.raw, E5: 6 } } }),
+  );
+  await assertSucceeds(setDoc(ref, data));
+});
+test("legacy project still accepts 28 items and rejects revised records", async () => {
+  const ref = doc(anon("a"), "projects", "p", "records", "S001_survey_POST");
+  const data = {
+    ...record("S001"),
+    unit: "POST",
+    phase: "POST",
+    status: "submitted",
+    submittedAt: serverTimestamp(),
+  };
+  await assertFails(
+    setDoc(ref, { ...data, instrumentVersion: "ai-on-feedback-2026-v2" }),
+  );
+  await assertSucceeds(setDoc(ref, data));
+});
+test("project instrument is immutable while ordinary settings and memberships stay intact", async () => {
+  const d = admin();
+  const member = await getDoc(doc(d, "admins", "admin@example.com"));
+  const old = await getDoc(
+    doc(d, "projects", "p", "records", "S001_survey_PRE"),
+  );
+  await assertFails(
+    updateDoc(doc(d, "projects", "p"), {
+      instrumentVersion: "ai-on-feedback-2026-v2",
+    }),
+  );
+  await assertSucceeds(updateDoc(doc(d, "projects", "p"), { name: "updated" }));
+  await assertSucceeds(
+    setDoc(doc(d, "projects", "new-v2"), {
+      instrumentVersion: "ai-on-feedback-2026-v2",
+      archived: false,
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(d, "projects", "new-v2"), {
+      instrumentVersion: "ai-on-report-2026-v1",
+    }),
+  );
+  assert.deepEqual(
+    (await getDoc(doc(d, "admins", "admin@example.com"))).data(),
+    member.data(),
+  );
+  assert.deepEqual(
+    (
+      await getDoc(doc(d, "projects", "p", "records", "S001_survey_PRE"))
+    ).data(),
+    old.data(),
+  );
+});
+test("expert reviews stay with their project version and legacy reviews remain editable", async () => {
+  const d = admin();
+  await assertSucceeds(
+    setDoc(doc(d, "projects", "p", "validity_reviews", "legacy"), {
+      ratings: { A5: { r: 4 } },
+      submitted: false,
+    }),
+  );
+  await assertSucceeds(
+    updateDoc(doc(d, "projects", "p", "validity_reviews", "legacy"), {
+      submitted: true,
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(d, "projects", "p", "validity_reviews", "legacy"), {
+      instrumentVersion: "ai-on-feedback-2026-v2",
+    }),
+  );
+  await assertSucceeds(
+    setDoc(doc(d, "projects", "v2"), {
+      instrumentVersion: "ai-on-feedback-2026-v2",
+      archived: false,
+    }),
+  );
+  const ref = doc(d, "projects", "v2", "validity_reviews", "new");
+  await assertFails(setDoc(ref, { ratings: { A6: { r: 4 } } }));
+  await assertSucceeds(
+    setDoc(ref, {
+      instrumentVersion: "ai-on-feedback-2026-v2",
+      ratings: { A6: { r: 4 } },
+    }),
+  );
+});
 test("admin can check and create new school login mappings while feature is disabled", async () => {
   const d = admin();
-  await updateDoc(doc(d, 'projects', 'p'), {schoolLoginEnabled: false});
-  for (const col of ['school_projects', 'school_access']) {
-    const ref = doc(d, col, 'f'.repeat(64));
-    await assertSucceeds(runTransaction(d, async tx => {
-      const existing = await tx.get(ref);
-      if (existing.exists()) throw Error('Unexpected mapping');
-      tx.set(ref, {project_id:'p', participant_id:'S001', tokenVersion:1, projectCode:'test'});
-    }));
+  await updateDoc(doc(d, "projects", "p"), { schoolLoginEnabled: false });
+  for (const col of ["school_projects", "school_access"]) {
+    const ref = doc(d, col, "f".repeat(64));
+    await assertSucceeds(
+      runTransaction(d, async (tx) => {
+        const existing = await tx.get(ref);
+        if (existing.exists()) throw Error("Unexpected mapping");
+        tx.set(ref, {
+          project_id: "p",
+          participant_id: "S001",
+          tokenVersion: 1,
+          projectCode: "test",
+        });
+      }),
+    );
   }
 });
 test("short project codes cannot be listed or used when school login is off", async () => {
-  const hash = 'e'.repeat(64);
-  await env.withSecurityRulesDisabled(async c => {
-    await updateDoc(doc(c.firestore(), 'projects', 'p'), {schoolLoginEnabled: true});
-    await setDoc(doc(c.firestore(), 'school_projects', hash), {project_id: 'p', projectCode: 'test-only'});
+  const hash = "e".repeat(64);
+  await env.withSecurityRulesDisabled(async (c) => {
+    await updateDoc(doc(c.firestore(), "projects", "p"), {
+      schoolLoginEnabled: true,
+    });
+    await setDoc(doc(c.firestore(), "school_projects", hash), {
+      project_id: "p",
+      projectCode: "test-only",
+    });
   });
-  await assertSucceeds(getDoc(doc(anon('a'), 'school_projects', hash)));
-  await assertFails(getDocs(collection(anon('a'), 'school_projects')));
-  await assertFails(setDoc(doc(anon('a'), 'school_projects', hash), {project_id: 'q'}));
-  await updateDoc(doc(admin(), 'projects', 'p'), {schoolLoginEnabled: false});
-  await assertFails(getDoc(doc(anon('a'), 'school_projects', hash)));
+  await assertSucceeds(getDoc(doc(anon("a"), "school_projects", hash)));
+  await assertFails(getDocs(collection(anon("a"), "school_projects")));
+  await assertFails(
+    setDoc(doc(anon("a"), "school_projects", hash), { project_id: "q" }),
+  );
+  await updateDoc(doc(admin(), "projects", "p"), { schoolLoginEnabled: false });
+  await assertFails(getDoc(doc(anon("a"), "school_projects", hash)));
 });
 test("submitted dialogue without a tool and with recorded question is accepted", async () => {
   const r = {
@@ -466,30 +594,56 @@ test("malformed and incomplete submitted surveys rejected", async () => {
   );
 });
 
-
 test("project deletion requires an administrator, a matching name and a deletion lock", async () => {
   await updateDoc(doc(admin(), "projects", "p"), { name: "삭제 테스트" });
   await assertFails(deleteDoc(doc(admin(), "projects", "p")));
-  await assertFails(deleteDoc(doc(admin(), "projects", "p", "records", "S001_survey_PRE")));
+  await assertFails(
+    deleteDoc(doc(admin(), "projects", "p", "records", "S001_survey_PRE")),
+  );
   await assertFails(deleteProjectData(anon("a"), "p", "삭제 테스트"));
-  await assert.rejects(deleteProjectData(admin(), "p", "wrong"), /프로젝트 이름/);
-  assert.equal((await getDoc(doc(admin(), "projects", "p"))).data().deleting, undefined);
+  await assert.rejects(
+    deleteProjectData(admin(), "p", "wrong"),
+    /프로젝트 이름/,
+  );
+  assert.equal(
+    (await getDoc(doc(admin(), "projects", "p"))).data().deleting,
+    undefined,
+  );
 });
 
 test("deleting projects block new writes, new student bindings, reopening and student deletion", async () => {
   const d = admin();
   await updateDoc(doc(d, "projects", "p"), { deleting: true, archived: true });
-  await assertFails(updateDoc(doc(d, "projects", "p"), { deleting: false, archived: false }));
-  await assertFails(setDoc(doc(d, "projects", "p", "participants", "S003"), { active: true }));
-  await assertFails(setDoc(doc(d, "projects", "p", "validity_reviews", "new"), { value: 1 }));
-  await assertFails(setDoc(doc(d, "access", "c".repeat(64)), { project_id: "p" }));
-  await assertFails(setDoc(doc(anon("new"), "bindings", "new"), {
-    project_id: "p", participant_id: "S001", tokenVersion: 1, codeHash: "a".repeat(64),
-  }));
-  await assertFails(getDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")));
-  await assertFails(deleteDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")));
+  await assertFails(
+    updateDoc(doc(d, "projects", "p"), { deleting: false, archived: false }),
+  );
+  await assertFails(
+    setDoc(doc(d, "projects", "p", "participants", "S003"), { active: true }),
+  );
+  await assertFails(
+    setDoc(doc(d, "projects", "p", "validity_reviews", "new"), { value: 1 }),
+  );
+  await assertFails(
+    setDoc(doc(d, "access", "c".repeat(64)), { project_id: "p" }),
+  );
+  await assertFails(
+    setDoc(doc(anon("new"), "bindings", "new"), {
+      project_id: "p",
+      participant_id: "S001",
+      tokenVersion: 1,
+      codeHash: "a".repeat(64),
+    }),
+  );
+  await assertFails(
+    getDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")),
+  );
+  await assertFails(
+    deleteDoc(doc(anon("a"), "projects", "p", "records", "S001_survey_PRE")),
+  );
   await assertFails(deleteDoc(doc(d, "projects", "q")));
-  await assertFails(getDocs(query(collection(d, "bindings"), where("project_id", "==", "q"))));
+  await assertFails(
+    getDocs(query(collection(d, "bindings"), where("project_id", "==", "q"))),
+  );
 });
 
 test("complete deletion drains multiple batches, revisions and all login mappings without touching another project", async () => {
@@ -498,26 +652,75 @@ test("complete deletion drains multiple batches, revisions and all login mapping
     const batch = writeBatch(d);
     batch.update(doc(d, "projects", "p"), { name: "삭제 테스트" });
     for (let i = 0; i < 205; i++)
-      batch.set(doc(d, "projects", "p", "records", "S001_survey_PRE", "revisions", String(i)), { before: { test: i } });
+      batch.set(
+        doc(
+          d,
+          "projects",
+          "p",
+          "records",
+          "S001_survey_PRE",
+          "revisions",
+          String(i),
+        ),
+        { before: { test: i } },
+      );
     for (const path of [
-      "projects/p/teacher_codings/r", "projects/p/teacher_codings/r/revisions/1",
-      "projects/p/private_settings/login", "projects/p/validity_reviews/v",
-      "school_access/old-hash", "school_projects/short-hash", "access/stale-hash",
-    ]) batch.set(doc(d, path), { project_id: "p" });
-    for (const name of ["access", "school_access", "school_projects", "bindings"])
+      "projects/p/teacher_codings/r",
+      "projects/p/teacher_codings/r/revisions/1",
+      "projects/p/private_settings/login",
+      "projects/p/validity_reviews/v",
+      "school_access/old-hash",
+      "school_projects/short-hash",
+      "access/stale-hash",
+    ])
+      batch.set(doc(d, path), { project_id: "p" });
+    for (const name of [
+      "access",
+      "school_access",
+      "school_projects",
+      "bindings",
+    ])
       batch.set(doc(d, name, "unrelated"), { project_id: "q" });
     await batch.commit();
   });
   const progress = [];
-  await assertSucceeds(deleteProjectData(admin(), "p", "삭제 테스트", (n) => progress.push(n)));
+  await assertSucceeds(
+    deleteProjectData(admin(), "p", "삭제 테스트", (n) => progress.push(n)),
+  );
   assert.ok(progress.at(-1) > 205);
   await env.withSecurityRulesDisabled(async (ctx) => {
     const d = ctx.firestore();
     assert.equal((await getDoc(doc(d, "projects", "p"))).exists(), false);
-    for (const path of ["records", "participants", "private_roster", "private_settings", "validity_reviews", "teacher_codings", "records/S001_survey_PRE/revisions", "teacher_codings/r/revisions"])
-      assert.equal((await getDocs(collection(d, "projects/p/" + path))).size, 0, path);
-    for (const name of ["access", "school_access", "school_projects", "bindings"]) {
-      assert.equal((await getDocs(query(collection(d, name), where("project_id", "==", "p")))).size, 0, name);
+    for (const path of [
+      "records",
+      "participants",
+      "private_roster",
+      "private_settings",
+      "validity_reviews",
+      "teacher_codings",
+      "records/S001_survey_PRE/revisions",
+      "teacher_codings/r/revisions",
+    ])
+      assert.equal(
+        (await getDocs(collection(d, "projects/p/" + path))).size,
+        0,
+        path,
+      );
+    for (const name of [
+      "access",
+      "school_access",
+      "school_projects",
+      "bindings",
+    ]) {
+      assert.equal(
+        (
+          await getDocs(
+            query(collection(d, name), where("project_id", "==", "p")),
+          )
+        ).size,
+        0,
+        name,
+      );
       assert.equal((await getDoc(doc(d, name, "unrelated"))).exists(), true);
     }
     assert.equal((await getDoc(doc(d, "projects", "q"))).exists(), true);
@@ -527,8 +730,16 @@ test("complete deletion drains multiple batches, revisions and all login mapping
 
 test("interrupted deletion keeps the lock and resumes", async () => {
   await updateDoc(doc(admin(), "projects", "p"), { name: "재시도" });
-  await assert.rejects(deleteProjectData(admin(), "p", "재시도", () => { throw Error("connection lost"); }), /connection lost/);
-  assert.equal((await getDoc(doc(admin(), "projects", "p"))).data().deleting, true);
+  await assert.rejects(
+    deleteProjectData(admin(), "p", "재시도", () => {
+      throw Error("connection lost");
+    }),
+    /connection lost/,
+  );
+  assert.equal(
+    (await getDoc(doc(admin(), "projects", "p"))).data().deleting,
+    true,
+  );
   await assertSucceeds(deleteProjectData(admin(), "p", "재시도"));
   assert.equal((await getDoc(doc(admin(), "projects", "p"))).exists(), false);
 });

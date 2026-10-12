@@ -242,3 +242,56 @@ export const INSTRUMENTS = [
 ];
 export const SURVEY = INSTRUMENTS.filter((x) => x.grp === "q");
 export const INSTRUMENT_VERSION = "ai-on-report-2026-v1";
+export const LATEST_INSTRUMENT_VERSION = "ai-on-feedback-2026-v2";
+
+// Keep original keys stable: display A5 is the former A6, not the removed A5.
+const revised = INSTRUMENTS.map((section) => ({
+  ...section,
+  title: section.id === "D" ? "D. AI도구 활용에 대한 인식" : section.title,
+  items: section.items
+    .filter(([id]) => id !== "A5" && id !== "D1")
+    .map((item) => {
+      const result = [...item];
+      if (item[0] === "B6")
+        result[1] =
+          "나는 탐구활동이 잘 진행 되지 않으면 방법을 바꿔 다시 시도한다.";
+      if (item[0] === "J3")
+        result[2] =
+          '기록 안내: "AI 답을 ___라고 의심해서(확인이 필요해서) ___로 확인했다"';
+      if (item[0] === "Q-HYP")
+        result[2] =
+          '정의: 탐구 가능한 질문/가설로 전환\n예시: "물의 온도가 높으면 각설탕이 더 잘 녹을까?"';
+      return result;
+    }),
+}));
+
+export function instrumentVersion(source) {
+  const version =
+    (typeof source === "string" ? source : source?.instrumentVersion) ||
+    INSTRUMENT_VERSION;
+  if (![INSTRUMENT_VERSION, LATEST_INSTRUMENT_VERSION].includes(version))
+    throw Error(
+      "지원하지 않는 연구도구 버전입니다. 새로고침 후 연구자에게 알려 주세요.",
+    );
+  return version;
+}
+export function instrumentsFor(source) {
+  return instrumentVersion(source) === INSTRUMENT_VERSION
+    ? INSTRUMENTS
+    : revised;
+}
+export const surveyFor = (source) =>
+  instrumentsFor(source).filter((s) => s.grp === "q");
+export const questionIdsFor = (source) =>
+  surveyFor(source).flatMap((s) => s.items.map(([id]) => id));
+export function itemLabel(id, source) {
+  if (instrumentVersion(source) === LATEST_INSTRUMENT_VERSION) {
+    if (id === "A6") return "A5";
+    if (/^D[2-5]$/.test(id)) return `D${Number(id.slice(1)) - 1}`;
+  }
+  return id;
+}
+export const instrumentName = (source) =>
+  instrumentVersion(source) === INSTRUMENT_VERSION
+    ? "기존판 · 28문항"
+    : "개정판 · 26문항";

@@ -1,10 +1,17 @@
 import React, { useState } from "react";
-import { INSTRUMENTS } from "../data/instruments.js";
+import {
+  instrumentsFor,
+  instrumentVersion,
+  instrumentName,
+  itemLabel,
+} from "../data/instruments.js";
 import { indices, scaleIndices } from "../utils/validity.js";
 import { csv, download } from "../utils/export.js";
 import * as store from "../services/store.js";
 import { Button, Field, ErrorBox, Status, useList } from "./UI.jsx";
 export default function Validity({ p }) {
+  const version = instrumentVersion(p);
+  const INSTRUMENTS = instrumentsFor(p);
   const [reviews, error] = useList(
       (cb, e) => store.watchList(p.id, "validity_reviews", cb, e),
       [p.id],
@@ -21,7 +28,9 @@ export default function Validity({ p }) {
     }),
     [msg, setMsg] = useState(""),
     [busy, setBusy] = useState(false);
-  const raters = reviews.filter((r) => r.submitted),
+  const raters = reviews.filter(
+      (r) => r.submitted && instrumentVersion(r) === version,
+    ),
     section = INSTRUMENTS.find((s) => s.id === group);
   function start(r) {
     setId(r?.id || crypto.randomUUID());
@@ -56,7 +65,11 @@ export default function Validity({ p }) {
         throw Error("모든 항목의 적합성과 명확성을 선택해 주세요.");
       if (!data.info.label.trim())
         throw Error("검토자 식별명을 입력해 주세요.");
-      await store.saveReview(p.id, id, { ...data, submitted });
+      await store.saveReview(p.id, id, {
+        ...data,
+        submitted,
+        instrumentVersion: version,
+      });
       setMsg(submitted ? "검토를 제출했습니다." : "검토 초안을 저장했습니다.");
       if (submitted) setMode("results");
     } catch (e) {
@@ -69,6 +82,7 @@ export default function Validity({ p }) {
     const rows = [
       [
         "review_id",
+        "instrument_version",
         "reviewer",
         "role",
         "years",
@@ -76,6 +90,7 @@ export default function Validity({ p }) {
         "submitted",
         "instrument",
         "item",
+        "display_item",
         "relevance",
         "clarity",
         "comment",
@@ -84,10 +99,11 @@ export default function Validity({ p }) {
       ],
     ];
     for (const r of reviews)
-      for (const s of INSTRUMENTS)
+      for (const s of instrumentsFor(r))
         for (const [id] of s.items)
           rows.push([
             r.id,
+            instrumentVersion(r),
             r.info.label,
             r.info.role,
             r.info.years,
@@ -95,6 +111,7 @@ export default function Validity({ p }) {
             r.submitted,
             s.id,
             id,
+            itemLabel(id, r),
             r.ratings[id]?.r,
             r.ratings[id]?.c,
             r.ratings[id]?.n,
@@ -108,6 +125,8 @@ export default function Validity({ p }) {
       [
         "instrument",
         "item",
+        "instrument_version",
+        "display_item",
         "N",
         "I_CVI",
         "clarity_I_CVI",
@@ -122,7 +141,19 @@ export default function Validity({ p }) {
       for (const [id] of s.items) {
         const r = indices(raters.map((v) => v.ratings[id]?.r)),
           c = indices(raters.map((v) => v.ratings[id]?.c));
-        rows.push([s.id, id, r.N, r.I, c.I, r.k, r.cvr, scale.ave, scale.ua]);
+        rows.push([
+          s.id,
+          id,
+          version,
+          itemLabel(id, version),
+          r.N,
+          r.I,
+          c.I,
+          r.k,
+          r.cvr,
+          scale.ave,
+          scale.ua,
+        ]);
       }
     }
     download("내용타당도_지수.csv", csv(rows), "text/csv;charset=utf-8");
@@ -133,6 +164,10 @@ export default function Validity({ p }) {
         <div>
           <h2>연구도구 · 내용타당도 검토</h2>
           <p>검사 문항, 성찰저널, 코드북과 루브릭을 함께 검토합니다.</p>
+          <p>
+            {instrumentName(p)} · 같은 버전의 검토만 집계합니다. 문항 개정은
+            타당도 검증 완료를 뜻하지 않습니다.
+          </p>
         </div>
         <Button primary onClick={() => start()}>
           새 전문가 검토
@@ -187,7 +222,7 @@ export default function Validity({ p }) {
           {section.items.map(([qid, text, note]) => (
             <section className="card" key={qid}>
               <h3>
-                {qid} · {text}
+                {itemLabel(qid, version)} · {text}
               </h3>
               {note && <p className="raw-text">{note}</p>}
               <div className="grid2">
@@ -293,7 +328,7 @@ export default function Validity({ p }) {
                       c = indices(raters.map((v) => v.ratings[id]?.c));
                     return (
                       <tr key={id}>
-                        <th>{id}</th>
+                        <th>{itemLabel(id, version)}</th>
                         <td>{r.N}</td>
                         <td>{r.I?.toFixed(3) || "—"}</td>
                         <td>{c.I?.toFixed(3) || "—"}</td>
@@ -319,7 +354,12 @@ export default function Validity({ p }) {
                   {r.info.role} · {r.submitted ? "제출 완료" : "초안"}
                 </p>
               </div>
-              <Button onClick={() => start(r)}>열기</Button>
+              <Button
+                disabled={instrumentVersion(r) !== version}
+                onClick={() => start(r)}
+              >
+                열기
+              </Button>
             </section>
           ))}
         </>

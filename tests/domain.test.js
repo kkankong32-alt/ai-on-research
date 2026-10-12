@@ -16,6 +16,142 @@ import {
 } from "../src/utils/domain.js";
 import { exportRows, csv } from "../src/utils/export.js";
 import { indices, scaleIndices } from "../src/utils/validity.js";
+import {
+  instrumentVersion,
+  INSTRUMENT_VERSION,
+  LATEST_INSTRUMENT_VERSION as V2,
+  surveyFor,
+  questionIdsFor,
+  itemLabel,
+  instrumentsFor,
+} from "../src/data/instruments.js";
+import { codesFor } from "../src/data/codebook.js";
+test("legacy projects remain 28 items while revised labels keep stable identities", () => {
+  assert.equal(instrumentVersion({}), INSTRUMENT_VERSION);
+  assert.equal(questionIdsFor({}).length, 28);
+  assert.equal(questionIdsFor(V2).length, 26);
+  assert.deepEqual(
+    surveyFor(V2).map((s) => s.items.length),
+    [5, 6, 6, 4, 5],
+  );
+  assert.equal(itemLabel("A6", V2), "A5");
+  assert.equal(itemLabel("D2", V2), "D1");
+  assert.equal(itemLabel("D5", V2), "D4");
+  assert.equal(itemLabel("A6"), "A6");
+  assert.ok(!questionIdsFor(V2).includes("A5"));
+  assert.ok(!questionIdsFor(V2).includes("D1"));
+  assert.throws(() => surveyFor("unknown"));
+});
+test("revision scoring ignores retired items without mutating historical answers", () => {
+  const raw = Object.fromEntries(questionIds.map((k) => [k, 4]));
+  raw.A5 = 1;
+  raw.D1 = 1;
+  raw.E5 = 2;
+  const before = structuredClone(raw);
+  assert.equal(scoreSurvey(raw).A_mean, 21 / 6);
+  assert.equal(scoreSurvey(raw).D_mean, 17 / 5);
+  assert.equal(scoreSurvey(raw, V2).A_mean, 4);
+  assert.equal(scoreSurvey(raw, V2).D_mean, 4);
+  assert.equal(scoreSurvey(raw, V2).E_mean, 4);
+  assert.equal(scoreSurvey(raw, V2).E5_raw, 2);
+  assert.equal(scoreSurvey(raw, V2).E5_reverse, 4);
+  assert.deepEqual(raw, before);
+  delete raw.A6;
+  assert.equal(scoreSurvey(raw, V2).A_mean, null);
+});
+test("revised submissions require exactly their own 26 answers", () => {
+  const raw = Object.fromEntries(questionIdsFor(V2).map((k) => [k, 3]));
+  assert.equal(validateRecord("survey", { raw }, true, V2), null);
+  assert.ok(validateRecord("survey", { raw }, true));
+  assert.ok(validateRecord("survey", { raw: { ...raw, A5: 3 } }, true, V2));
+  assert.ok(validateRecord("survey", { raw: { ...raw, E5: 0 } }, true, V2));
+});
+test("CSV separates versions and supplies display labels without replacing original IDs", () => {
+  const records = [undefined, V2].map((v, i) => ({
+    id: String(i),
+    participant_id: "S001",
+    kind: "survey",
+    phase: i ? "POST" : "PRE",
+    status: "submitted",
+    instrumentVersion: v,
+    data: { raw: Object.fromEntries(questionIdsFor(v).map((k) => [k, 3])) },
+  }));
+  records[0].data.raw.A5 = 1;
+  const original = structuredClone(records);
+  const rows = exportRows(
+    "survey",
+    { id: "p", instrumentVersion: V2 },
+    [],
+    records,
+  );
+  const at = (k) => rows[0].indexOf(k);
+  assert.equal(rows[1][at("instrument_version")], INSTRUMENT_VERSION);
+  assert.equal(rows[2][at("instrument_version")], V2);
+  assert.equal(rows[1][at("A5")], 1);
+  assert.equal(rows[2][at("A5")], "");
+  assert.equal(rows[2][at("A6")], 3);
+  assert.equal(rows[2][at("question_count")], 26);
+  assert.ok(rows.every((r) => r.length === rows[0].length));
+  assert.deepEqual(records, original);
+  const dict = exportRows("dictionary", { instrumentVersion: V2 }, [], records);
+  assert.ok(dict.some((r) => r[0] === V2 && r[2] === "A6" && r[3] === "A5"));
+  assert.ok(
+    dict.some(
+      (r) =>
+        r[0] === INSTRUMENT_VERSION &&
+        r[2] === "A5" &&
+        r[4].includes("아이디어"),
+    ),
+  );
+});
+test("blue revisions apply only to revised instruments and custom questions survive", () => {
+  const note = (v, id) =>
+    instrumentsFor(v)
+      .flatMap((s) => s.items)
+      .find((x) => x[0] === id);
+  assert.match(note(V2, "B6")[1], /탐구활동이 잘 진행 되지 않으면/);
+  assert.match(note(V2, "J3")[2], /확인이 필요해서/);
+  assert.doesNotMatch(note(undefined, "J3")[2], /확인이 필요해서/);
+  assert.match(codesFor(V2).find((c) => c.k === "Q-HYP").ex, /각설탕/);
+  assert.match(codesFor().find((c) => c.k === "Q-HYP").ex, /거품/);
+  const p = {
+    instrumentVersion: V2,
+    enabled: { prompt: false },
+    sessions: { 1: { questions: { doubt: "우리 반의 질문" } } },
+  };
+  const snapshot = sessionQuestions(p, 1);
+  assert.equal(snapshot.doubt, "우리 반의 질문");
+  p.sessions[1].questions.doubt = "새 질문";
+  assert.equal(snapshot.doubt, "우리 반의 질문");
+  assert.equal(sessionSettings(p, 1).prompt, false);
+});
+test("R-ACCEPT exports distinguish automatic context review from teacher confirmation", () => {
+  const r = {
+    id: "r",
+    kind: "prompt",
+    status: "submitted",
+    data: {
+      turns: [
+        {
+          turn_no: 1,
+          speaker: "student",
+          auto_code: "R-ACCEPT",
+          raw_text: "응",
+        },
+      ],
+    },
+  };
+  for (const teacher of [null, "R-ACCEPT", "Q-INFO"]) {
+    const rows = exportRows("prompt", {}, [], [r], {
+      r: { codes: { 1: teacher } },
+    });
+    const at = (k) => rows[1][rows[0].indexOf(k)];
+    assert.equal(at("context_review_needed"), !teacher);
+    assert.equal(at("code_source"), teacher ? "teacher" : "automatic_draft");
+    assert.equal(at("final_code"), teacher || "R-ACCEPT");
+    assert.equal(rows[0].length, rows[1].length);
+  }
+});
 test("session questions use defaults, keep overrides and omit AI tasks when disabled", () => {
   const p = {
     sessionCount: 2,

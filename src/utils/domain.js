@@ -1,4 +1,10 @@
 import { SURVEY, INSTRUMENT_VERSION } from "../data/instruments.js";
+import {
+  surveyFor,
+  questionIdsFor,
+  instrumentVersion,
+  LATEST_INSTRUMENT_VERSION,
+} from "../data/instruments.js";
 import { CODE_RULES, MOODS, POS_WORDS, NEG_WORDS } from "../data/codebook.js";
 export const questionIds = SURVEY.flatMap((s) => s.items.map((i) => i[0]));
 export const phaseNames = {
@@ -46,12 +52,12 @@ export async function hashCode(s) {
     .map((x) => x.toString(16).padStart(2, "0"))
     .join("");
 }
-export function scoreSurvey(raw) {
+export function scoreSurvey(raw, source) {
   const out = {
     E5_raw: raw.E5 ?? null,
     E5_reverse: raw.E5 ? 6 - raw.E5 : null,
   };
-  for (const s of SURVEY) {
+  for (const s of surveyFor(source)) {
     const v = s.items
       .map(([id]) => raw[id])
       .filter((x) => Number.isInteger(x) && x >= 1 && x <= 5);
@@ -127,14 +133,17 @@ export function journalDraft(j) {
     meta: null,
   };
 }
-export function validateRecord(kind, data, submit) {
+export function validateRecord(kind, data, submit, source) {
   if (!submit) return null;
   if (
     kind === "survey" &&
-    !questionIds.every(
+    (!questionIdsFor(source).every(
       (k) =>
         Number.isInteger(data.raw?.[k]) && data.raw[k] >= 1 && data.raw[k] <= 5,
-    )
+    ) ||
+      Object.keys(data.raw || {}).some(
+        (k) => !questionIdsFor(source).includes(k),
+      ))
   )
     return "아직 답하지 않은 문항을 확인해 주세요.";
   if (
@@ -173,10 +182,20 @@ export const DEFAULT_SESSION_QUESTIONS = {
   next: "다음에 해보고 싶은 것",
   prompt: "이번 차시 탐구에서 주고받은 AI 대화를 기록해 주세요.",
 };
+export function defaultSessionQuestions(project) {
+  const defaults = { ...DEFAULT_SESSION_QUESTIONS };
+  if (instrumentVersion(project) === LATEST_INSTRUMENT_VERSION) {
+    defaults.no_doubt =
+      "오늘 탐구에서 확인이 필요하다고 생각한 내용이 있었나요?";
+    defaults.doubt = "무엇을 의심했거나 확인이 필요하다고 생각했나요?";
+  }
+  return defaults;
+}
 export function sessionQuestions(project, number) {
   const custom = project.sessions?.[String(number)]?.questions || {};
+  const defaults = defaultSessionQuestions(project);
   return Object.fromEntries(
-    Object.entries(DEFAULT_SESSION_QUESTIONS).map(([k, value]) => [
+    Object.entries(defaults).map(([k, value]) => [
       k,
       custom[k]?.trim() || value,
     ]),

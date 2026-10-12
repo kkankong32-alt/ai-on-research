@@ -1,3 +1,10 @@
+import { instrumentVersion, LATEST_INSTRUMENT_VERSION } from "./instruments.js";
+export const codesFor = (source) =>
+  CODES.map((c) =>
+    c.k === "Q-HYP" && instrumentVersion(source) === LATEST_INSTRUMENT_VERSION
+      ? { ...c, ex: '"물의 온도가 높으면 각설탕이 더 잘 녹을까?"' }
+      : c,
+  );
 export const MOODS = [
   ["즐거움", 1],
   ["뿌듯함", 1],

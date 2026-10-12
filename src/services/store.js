@@ -22,11 +22,15 @@ import {
 import { auth, db, configured } from "./firebase.js";
 import { deleteProjectData } from "./deleteProject.js";
 import {
+  instrumentVersion,
+  instrumentsFor,
+  LATEST_INSTRUMENT_VERSION,
+} from "../data/instruments.js";
+import {
   hashCode,
   newCode,
   makeParticipants,
   recordKey,
-  INSTRUMENT_VERSION,
   schoolLoginKey,
   normalizeCode,
 } from "../utils/domain.js";
@@ -156,6 +160,7 @@ export function preview(role = "ADMIN") {
   if (!memory.projects.length) {
     const p = {
       id: "preview-project",
+      instrumentVersion: LATEST_INSTRUMENT_VERSION,
       name: "우리의 첫 번째 과학 탐구",
       teacher: "연구 선생님",
       group: "탐구교실",
@@ -268,6 +273,7 @@ export async function createProject(input) {
   const { names: _, count: __, ...settings } = input;
   const project = {
     ...settings,
+    instrumentVersion: LATEST_INSTRUMENT_VERSION,
     id,
     archived: false,
     postOpen: false,
@@ -323,6 +329,10 @@ export async function createProject(input) {
   }
 }
 export async function updateProject(id, patch) {
+  if ("instrumentVersion" in patch)
+    throw Error(
+      "프로젝트의 연구도구 버전은 변경할 수 없습니다. 개정판은 새 프로젝트에서 사용해 주세요.",
+    );
   if (demo) {
     Object.assign(
       memory.projects.find((p) => p.id === id),
@@ -563,7 +573,9 @@ export async function saveRecord(
       phase: kind === "survey" ? unit : null,
       data,
       status,
-      instrumentVersion: INSTRUMENT_VERSION,
+      instrumentVersion: instrumentVersion(
+        old || memory.projects.find((p) => p.id === pid),
+      ),
       revision: (old?.revision || 0) + 1,
       createdAt: old?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -578,6 +590,7 @@ export async function saveRecord(
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(ref),
       old = snap.data();
+    const project = await tx.get(doc(db, "projects", pid));
     if (old?.status === "submitted")
       throw Error("이미 제출한 기록이에요. 선생님께 수정을 요청해 주세요.");
     if ((old?.revision || 0) !== expectedRevision)
@@ -601,7 +614,7 @@ export async function saveRecord(
       phase: kind === "survey" ? unit : null,
       data,
       status,
-      instrumentVersion: INSTRUMENT_VERSION,
+      instrumentVersion: instrumentVersion(old || project.data()),
       revision,
       createdAt: old?.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -657,6 +670,12 @@ export async function saveCoding(pid, rid, data) {
   });
 }
 export async function saveReview(pid, id, data) {
+  const project = demo
+    ? memory.projects.find((p) => p.id === pid)
+    : (await getDoc(doc(db, "projects", pid))).data();
+  if (instrumentVersion(data) !== instrumentVersion(project))
+    throw Error("검토 대상 연구도구 버전이 프로젝트와 다릅니다.");
+  data = { ...data, instrumentVersion: instrumentVersion(project) };
   if (demo) {
     const list = memory.reviews[pid];
     const i = list.findIndex((v) => v.id === id);
@@ -692,12 +711,14 @@ export async function backup(pid) {
     return {
       ...result,
       project: memory.projects.find((p) => p.id === pid),
+      instruments: instrumentsFor(memory.projects.find((p) => p.id === pid)),
       participants: memory.participants[pid],
       records: memory.records[pid],
       teacher_codings: memory.codings[pid],
       validity_reviews: memory.reviews[pid],
     };
   result.project = (await getDoc(doc(db, "projects", pid))).data();
+  result.instruments = instrumentsFor(result.project);
   for (const type of [
     "participants",
     "records",
@@ -728,7 +749,14 @@ export async function deleteProject(pid, confirmation, onProgress) {
     if (confirmation !== project.name)
       throw Error("프로젝트 이름을 정확히 입력해 주세요.");
     memory.projects = memory.projects.filter((p) => p.id !== pid);
-    for (const key of ["participants", "records", "codings", "roster", "reviews", "login"])
+    for (const key of [
+      "participants",
+      "records",
+      "codings",
+      "roster",
+      "reviews",
+      "login",
+    ])
       delete memory[key][pid];
     emit();
     return;

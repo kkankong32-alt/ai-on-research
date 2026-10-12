@@ -1,5 +1,11 @@
-import { questionIds, scoreSurvey, tasksFor } from "./domain.js";
+import { scoreSurvey, tasksFor } from "./domain.js";
 import { RUBRIC } from "../data/codebook.js";
+import {
+  instrumentVersion,
+  instrumentsFor,
+  itemLabel,
+  questionIdsFor,
+} from "../data/instruments.js";
 export function csv(rows) {
   return (
     "\ufeff" +
@@ -50,29 +56,75 @@ export function exportRows(
     ...(includeNames ? [roster[r.participant_id]?.name || ""] : []),
   ];
   const list = records.filter((r) => r.status === "submitted");
+  const surveyIds = [
+    ...new Set([
+      ...questionIdsFor(p),
+      ...list
+        .filter((r) => r.kind === "survey")
+        .flatMap((r) => questionIdsFor(r)),
+    ]),
+  ];
+  if (kind === "dictionary") {
+    const versions = [
+      ...new Set([
+        instrumentVersion(p),
+        ...records.map((r) => instrumentVersion(r)),
+      ]),
+    ];
+    return [
+      [
+        "instrument_version",
+        "section",
+        "stable_item_id",
+        "display_item",
+        "text",
+        "note",
+        "reverse_scored",
+      ],
+      ...versions.flatMap((v) =>
+        instrumentsFor(v).flatMap((s) =>
+          s.items.map(([id, text, note]) => [
+            v,
+            s.id,
+            id,
+            itemLabel(id, v),
+            text,
+            note || "",
+            id === "E5",
+          ]),
+        ),
+      ),
+    ];
+  }
   if (kind === "survey")
     return [
       [
         ...base,
         "phase",
-        ...questionIds,
+        ...surveyIds,
         "E5_raw",
         "E5_reverse",
         ..."ABCDE".split("").map((k) => k + "_mean"),
         "submitted_at",
+        "instrument_version",
+        "question_count",
       ],
       ...list
         .filter((r) => r.kind === "survey")
         .map((r) => {
-          const s = scoreSurvey(r.data.raw);
+          const s = scoreSurvey(r.data.raw, r);
           return [
             ...b(r),
             r.phase,
-            ...questionIds.map((k) => r.data.raw[k]),
+            ...surveyIds.map((k) =>
+              questionIdsFor(r).includes(k) ? r.data.raw[k] : "",
+            ),
             s.E5_raw,
             s.E5_reverse,
             ..."ABCDE".split("").map((k) => s[k + "_mean"]),
             date(r.submittedAt),
+            instrumentVersion(r),
+            questionIdsFor(r).length,
           ];
         }),
     ];
@@ -101,6 +153,7 @@ export function exportRows(
         "teacher_memo",
         "created_at",
         "questions_json",
+        "instrument_version",
       ],
       ...list
         .filter((r) => r.kind === "journal")
@@ -116,6 +169,7 @@ export function exportRows(
           codings[r.id]?.memo,
           date(r.createdAt),
           JSON.stringify(r.data.questions || {}),
+          instrumentVersion(r),
         ]),
     ];
   }
@@ -133,6 +187,9 @@ export function exportRows(
         "final_code",
         "created_at",
         "prompt_question",
+        "code_source",
+        "context_review_needed",
+        "instrument_version",
       ],
       ...list
         .filter((r) => r.kind === "prompt")
@@ -151,6 +208,13 @@ export function exportRows(
               teacher ?? t.auto_code,
               date(r.createdAt),
               r.data.questions?.prompt || "",
+              t.speaker !== "student"
+                ? ""
+                : teacher
+                  ? "teacher"
+                  : "automatic_draft",
+              t.speaker === "student" && !teacher && t.auto_code === "R-ACCEPT",
+              instrumentVersion(r),
             ];
           }),
         ),
@@ -167,6 +231,7 @@ export function exportRows(
           x.k + "_final",
         ]),
         "teacher_memo",
+        "instrument_version",
       ],
       ...list
         .filter((r) => r.kind === "prompt")
@@ -180,6 +245,7 @@ export function exportRows(
             codings[r.id]?.rubric?.[x.k] ?? r.data.rubricDraft?.[x.k],
           ]),
           codings[r.id]?.memo,
+          instrumentVersion(r),
         ]),
     ];
   return [

@@ -22,10 +22,10 @@ import {
   scoreSurvey,
   phaseNames,
   sessionSettings,
-  DEFAULT_SESSION_QUESTIONS,
+  defaultSessionQuestions,
 } from "../utils/domain.js";
 import { csv, download, exportRows } from "../utils/export.js";
-import { CODES, RUBRIC } from "../data/codebook.js";
+import { CODES, RUBRIC, codesFor } from "../data/codebook.js";
 import {
   Button,
   Field,
@@ -38,6 +38,10 @@ import {
   ArrowLeft,
 } from "./UI.jsx";
 import { RecordText } from "./Student.jsx";
+import {
+  instrumentName,
+  LATEST_INSTRUMENT_VERSION,
+} from "../data/instruments.js";
 import Validity from "./Validity.jsx";
 export default function Admin({ user }) {
   return (
@@ -301,6 +305,10 @@ function ProjectForm({ original, onSaved }) {
           <span className="eyebrow">NEW EXPLORATION</span>
           <h1>{original ? "프로젝트 설정" : "새로운 탐구를 시작해요"}</h1>
           <p>세 단계면 학생들의 기록장이 준비됩니다.</p>
+          <p>
+            {instrumentName(original || LATEST_INSTRUMENT_VERSION)} · 수집 중
+            문항이 바뀌지 않도록 프로젝트별로 고정됩니다.
+          </p>
         </div>
       </div>
       <div className="mini-steps">
@@ -500,7 +508,11 @@ function ProjectForm({ original, onSaved }) {
                         빈칸은 기본 질문을 사용합니다. 이미 작성한 기록은 당시
                         질문을 보존합니다.
                       </p>
-                      {Object.entries(DEFAULT_SESSION_QUESTIONS)
+                      {Object.entries(
+                        defaultSessionQuestions(
+                          original || LATEST_INSTRUMENT_VERSION,
+                        ),
+                      )
                         .filter(([key]) =>
                           key === "prompt"
                             ? sessionSettings(form, n).prompt
@@ -584,7 +596,13 @@ function ProjectView() {
   );
   const codings = Object.fromEntries(codingList.map((c) => [c.id, c]));
   if (project === undefined) return <p>프로젝트를 불러오는 중입니다…</p>;
-  if (!project) return <><p>삭제되었거나 존재하지 않는 프로젝트입니다.</p><Link to="/admin">프로젝트 목록으로</Link></>;
+  if (!project)
+    return (
+      <>
+        <p>삭제되었거나 존재하지 않는 프로젝트입니다.</p>
+        <Link to="/admin">프로젝트 목록으로</Link>
+      </>
+    );
   const tabs = [
     ["progress", "진행현황"],
     ["timeline", "학생 기록"],
@@ -603,6 +621,9 @@ function ProjectView() {
         <div>
           <span className="eyebrow">PROJECT WORKSPACE</span>
           <h1>{project.name}</h1>
+          <p>
+            {instrumentName(project)} · 기존 응답과 연구도구 버전을 유지합니다.
+          </p>
           <p>
             {project.teacher} · {project.group} · {project.sessionCount}차시
           </p>
@@ -624,7 +645,12 @@ function ProjectView() {
         ))}
       </div>
       <ErrorBox error={error || pe || re || ce} />
-      {project.deleting && <div role="status" className="notice error">삭제가 시작된 프로젝트입니다. 새 기록은 저장되지 않습니다. 중단된 경우 설정에서 완전 삭제를 다시 실행하세요.</div>}
+      {project.deleting && (
+        <div role="status" className="notice error">
+          삭제가 시작된 프로젝트입니다. 새 기록은 저장되지 않습니다. 중단된 경우
+          설정에서 완전 삭제를 다시 실행하세요.
+        </div>
+      )}
       {tab === "progress" ? (
         <ProgressTable
           p={project}
@@ -655,7 +681,12 @@ function ProjectView() {
         />
       ) : tab === "settings" ? (
         <>
-          <fieldset disabled={!!project.deleting} className="project-controls"><ProjectForm original={project} onSaved={() => setTab("progress")} /></fieldset>
+          <fieldset disabled={!!project.deleting} className="project-controls">
+            <ProjectForm
+              original={project}
+              onSaved={() => setTab("progress")}
+            />
+          </fieldset>
           <ProjectActions p={project} />
         </>
       ) : tab === "charts" ? (
@@ -858,7 +889,7 @@ function Timeline({
             </div>
             {r.kind === "survey" && (
               <div className="score-grid">
-                {Object.entries(scoreSurvey(r.data.raw))
+                {Object.entries(scoreSurvey(r.data.raw, r))
                   .filter(([k]) => k.endsWith("_mean"))
                   .map(([k, v]) => (
                     <div key={k}>
@@ -870,7 +901,11 @@ function Timeline({
             )}
             <details open={r.kind !== "prompt"}>
               <summary>학생 원자료 보기</summary>
-              <RecordText kind={r.kind} data={r.data} />
+              <RecordText
+                kind={r.kind}
+                data={r.data}
+                version={r.instrumentVersion}
+              />
             </details>
             {r.kind !== "survey" && r.status === "submitted" && (
               <Coding
@@ -940,6 +975,18 @@ function Coding({ p, r, coding }) {
       </p>
       {r.kind === "prompt" ? (
         <>
+          <details className="card">
+            <summary>코딩 기준과 예시 보기</summary>
+            {codesFor(r).map((c) => (
+              <p key={c.k}>
+                <strong>
+                  {c.k} · {c.n}
+                </strong>
+                <br />
+                {c.d} · 예: {c.ex}
+              </p>
+            ))}
+          </details>
           {r.data.turns.map((t) => (
             <div className={`turn ${t.speaker}`} key={t.turn_no}>
               <Status>{t.speaker === "student" ? "학생" : "AI"}</Status>
@@ -948,6 +995,13 @@ function Coding({ p, r, coding }) {
                 {t.speaker === "student" && (
                   <>
                     <small>자동분류: {t.auto_code}</small>
+                    {t.auto_code === "R-ACCEPT" &&
+                      !value.codes?.[t.turn_no] && (
+                        <p className="muted">
+                          맥락 검토 필요: 짧은 동의만으로 무비판 수용을 확정하지
+                          마세요. 위아래 발화를 함께 읽고 판단해 주세요.
+                        </p>
+                      )}
                     <Field label={`${t.turn_no}번 발화 교사확정`}>
                       <select
                         value={value.codes?.[t.turn_no] || ""}
@@ -1416,6 +1470,11 @@ function Exports({ p, participants, records, codings }) {
     <>
       <h2>연구자료 내보내기</h2>
       <p>프로젝트 ID와 학생 연구번호로 모든 시점의 자료가 연결됩니다.</p>
+      <p className="muted">
+        {instrumentName(p)} · 검사 CSV의 열 이름은 원자료 식별값입니다. 화면
+        번호와 문항 내용은 ‘연구도구 문항표’에서 확인하세요. 서로 다른 버전은
+        구분하여 분석해 주세요.
+      </p>
       <section className="card">
         <label className="check-label">
           <input
@@ -1434,6 +1493,11 @@ function Exports({ p, participants, records, codings }) {
       <div className="export-grid">
         {[
           ["survey", "검사 원자료", "PRE · POST · DELAYED / 원응답과 역채점"],
+          [
+            "dictionary",
+            "연구도구 문항표",
+            "도구 버전 · 화면 번호 · 원자료 식별값 · 문항 내용",
+          ],
           ["journal", "성찰저널", "7개 항목과 자동·교사 코딩"],
           ["prompt", "프롬프트 발화 코딩", "원문 · 자동 · 교사 · 최종 코드"],
           ["rubric", "프롬프트 루브릭", "5개 차원의 초안과 교사 평정"],
@@ -1469,112 +1533,112 @@ function ProjectActions({ p }) {
     <section className="card narrow">
       <h2>운영 설정</h2>
       <fieldset disabled={!!p.deleting} className="project-controls">
-      <h3>차시 열기와 잠금</h3>
-      <p>
-        기본은 자유 진행입니다. 학생이 원하는 차시부터 기록할 수 있습니다.
-        필요한 차시만 잠그거나 순차 진행으로 바꿀 수 있습니다.
-      </p>
-      {Array.from({ length: p.sessionCount }, (_, i) => i + 1).map((n) => (
-        <Field key={n} label={`${n}차시 진행 방식`}>
-          <select
-            value={sessionSettings(p, n).access}
-            onChange={async (e) => {
-              try {
-                await store.updateProject(p.id, {
-                  sessions: {
-                    ...p.sessions,
-                    [n]: { ...sessionSettings(p, n), access: e.target.value },
-                  },
-                });
-                setMsg(`${n}차시 진행 방식을 저장했습니다.`);
-              } catch (e) {
-                setMsg(e.message);
+        <h3>차시 열기와 잠금</h3>
+        <p>
+          기본은 자유 진행입니다. 학생이 원하는 차시부터 기록할 수 있습니다.
+          필요한 차시만 잠그거나 순차 진행으로 바꿀 수 있습니다.
+        </p>
+        {Array.from({ length: p.sessionCount }, (_, i) => i + 1).map((n) => (
+          <Field key={n} label={`${n}차시 진행 방식`}>
+            <select
+              value={sessionSettings(p, n).access}
+              onChange={async (e) => {
+                try {
+                  await store.updateProject(p.id, {
+                    sessions: {
+                      ...p.sessions,
+                      [n]: { ...sessionSettings(p, n), access: e.target.value },
+                    },
+                  });
+                  setMsg(`${n}차시 진행 방식을 저장했습니다.`);
+                } catch (e) {
+                  setMsg(e.message);
+                }
+              }}
+            >
+              <option value="auto">자유 진행 (기본)</option>
+              <option value="sequential">앞 활동 완료 후 열기</option>
+              <option value="open">수동 열기</option>
+              <option value="locked">잠금</option>
+            </select>
+          </Field>
+        ))}
+        {[
+          ["postOpen", "사후검사 지금 열기"],
+          ["delayedOpen", "지연검사 열기"],
+        ].map(([k, l]) => (
+          <label key={k} className="setting-option">
+            <input
+              type="checkbox"
+              checked={p[k]}
+              onChange={(e) =>
+                store
+                  .updateProject(p.id, { [k]: e.target.checked })
+                  .catch((e) => setMsg(e.message))
               }
-            }}
-          >
-            <option value="auto">자유 진행 (기본)</option>
-            <option value="sequential">앞 활동 완료 후 열기</option>
-            <option value="open">수동 열기</option>
-            <option value="locked">잠금</option>
-          </select>
-        </Field>
-      ))}
-      {[
-        ["postOpen", "사후검사 지금 열기"],
-        ["delayedOpen", "지연검사 열기"],
-      ].map(([k, l]) => (
-        <label key={k} className="setting-option">
-          <input
-            type="checkbox"
-            checked={p[k]}
-            onChange={(e) =>
-              store
-                .updateProject(p.id, { [k]: e.target.checked })
-                .catch((e) => setMsg(e.message))
-            }
-          />
-          {l}
-        </label>
-      ))}
-      <Button
-        onClick={() =>
-          store
-            .updateProject(p.id, { archived: !p.archived })
-            .catch((e) => setMsg(e.message))
-        }
-      >
-        <Archive size={17} />
-        {p.archived ? "프로젝트 다시 열기" : "프로젝트 보관"}
-      </Button>
-      <h3>다음 학급에 같은 구조 사용하기</h3>
-      <Field label="새 학급 학생 수">
-        <input
-          type="number"
-          min="1"
-          max="500"
-          value={count}
-          onChange={(e) => setCount(Number(e.target.value))}
-        />
-      </Field>
-      <Button
-        onClick={async () => {
-          try {
-            const {
-              name,
-              teacher,
-              group,
-              topic,
-              startDate,
-              sessionCount,
-              enabled,
-              sessions,
-            } = p;
-            const id = await store.createProject({
-              name: name + " (복제)",
-              teacher,
-              group,
-              topic,
-              startDate,
-              sessionCount,
-              enabled,
-              sessions: Object.fromEntries(
-                Object.entries(sessions || {}).map(([n, s]) => [
-                  n,
-                  { ...s, access: "auto" },
-                ]),
-              ),
-              count,
-              names: "",
-            });
-            nav(`/admin/project/${id}`);
-          } catch (e) {
-            setMsg(e.message);
+            />
+            {l}
+          </label>
+        ))}
+        <Button
+          onClick={() =>
+            store
+              .updateProject(p.id, { archived: !p.archived })
+              .catch((e) => setMsg(e.message))
           }
-        }}
-      >
-        <Copy size={16} /> 설정만 복제
-      </Button>
-      <p>기존 학생과 연구자료는 복사하지 않습니다.</p>
+        >
+          <Archive size={17} />
+          {p.archived ? "프로젝트 다시 열기" : "프로젝트 보관"}
+        </Button>
+        <h3>다음 학급에 같은 구조 사용하기</h3>
+        <Field label="새 학급 학생 수">
+          <input
+            type="number"
+            min="1"
+            max="500"
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value))}
+          />
+        </Field>
+        <Button
+          onClick={async () => {
+            try {
+              const {
+                name,
+                teacher,
+                group,
+                topic,
+                startDate,
+                sessionCount,
+                enabled,
+                sessions,
+              } = p;
+              const id = await store.createProject({
+                name: name + " (복제)",
+                teacher,
+                group,
+                topic,
+                startDate,
+                sessionCount,
+                enabled,
+                sessions: Object.fromEntries(
+                  Object.entries(sessions || {}).map(([n, s]) => [
+                    n,
+                    { ...s, access: "auto" },
+                  ]),
+                ),
+                count,
+                names: "",
+              });
+              nav(`/admin/project/${id}`);
+            } catch (e) {
+              setMsg(e.message);
+            }
+          }}
+        >
+          <Copy size={16} /> 설정만 복제
+        </Button>
+        <p>기존 학생과 연구자료는 복사하지 않습니다.</p>
       </fieldset>
       <p role="status">{msg}</p>
       <DeleteProjectControl p={p} />
@@ -1582,6 +1646,7 @@ function ProjectActions({ p }) {
   );
 }
 function Charts({ p, records, codings }) {
+  const [confirmedOnly, setConfirmedOnly] = useState(false);
   const [session, setSession] = useState("all"),
     [sid, setSid] = useState("all");
   const ids = [...new Set(records.map((r) => r.participant_id))].sort();
@@ -1597,7 +1662,12 @@ function Charts({ p, records, codings }) {
       .flatMap((r) =>
         r.data.turns
           .filter((t) => t.speaker === "student")
-          .map((t) => codings[r.id]?.codes?.[t.turn_no] ?? t.auto_code),
+          .map(
+            (t) =>
+              codings[r.id]?.codes?.[t.turn_no] ??
+              (confirmedOnly ? null : t.auto_code),
+          )
+          .filter(Boolean),
       );
   const avg = journals.length
     ? journals.reduce((a, r) => a + r.data.challenge, 0) / journals.length
@@ -1641,6 +1711,22 @@ function Charts({ p, records, codings }) {
         />
         <Metric label="성찰 기록" value={journals.length} unit="건" />
       </div>
+      <label className="check-label">
+        <input
+          type="checkbox"
+          checked={confirmedOnly}
+          onChange={(e) => setConfirmedOnly(e.target.checked)}
+        />
+        프롬프트 유형·검증 발화 비율에 교사 확정값만 사용
+      </label>
+      <p className="muted">
+        발화 집계 {turns.length}건 ·{" "}
+        {confirmedOnly
+          ? "교사 확정 자료만 포함"
+          : "교사 확정값 우선, 미확정 자동 초안 포함"}
+        . 학생을 선택하면 개인의 차시별 변화를 볼 수 있습니다. 도전 점수는 과제
+        수준과 학생에 따라 달라지므로 상승만으로 효과를 판단하지 마세요.
+      </p>
       <div className="grid2">
         <section className="card">
           <h3>차시별 도전 점수</h3>
@@ -1781,7 +1867,8 @@ function Members({ user }) {
           <div>
             <strong>{m.email}</strong>
             <p>
-              {m.role === "SUPER_ADMIN" ? "총괄관리자" : "연구회원"} · {m.active ? "로그인 허용됨" : "로그인 차단됨"}
+              {m.role === "SUPER_ADMIN" ? "총괄관리자" : "연구회원"} ·{" "}
+              {m.active ? "로그인 허용됨" : "로그인 차단됨"}
             </p>
           </div>
           {m.role !== "SUPER_ADMIN" && (
@@ -1811,29 +1898,69 @@ function DeleteProjectControl({ p }) {
   return (
     <details className="delete-project" open={p.deleting || undefined}>
       <summary>프로젝트 완전 삭제</summary>
-      <p><strong>{p.name}</strong>의 서버에 저장된 학생 정보, 검사·성찰·AI 대화 기록, 교사 코딩, 수정이력과 접속정보가 삭제됩니다. 복구할 수 없습니다.</p>
-      {store.isDemo() && <p>현재 미리보기입니다. 예시 자료만 삭제되며 실제 프로젝트에는 영향을 주지 않습니다.</p>}
+      <p>
+        <strong>{p.name}</strong>의 서버에 저장된 학생 정보, 검사·성찰·AI 대화
+        기록, 교사 코딩, 수정이력과 접속정보가 삭제됩니다. 복구할 수 없습니다.
+      </p>
+      {store.isDemo() && (
+        <p>
+          현재 미리보기입니다. 예시 자료만 삭제되며 실제 프로젝트에는 영향을
+          주지 않습니다.
+        </p>
+      )}
       <p>필요한 자료는 먼저 ‘자료 내보내기’에서 내려받으세요.</p>
-      <form onSubmit={async (e) => {
-        e.preventDefault();
-        if (busy || confirmation !== p.name || !acknowledged) return;
-        setBusy(true); setError("");
-        try {
-          await store.deleteProject(p.id, confirmation, setProgress);
-          nav("/admin", { replace: true });
-        } catch (e) {
-          setError(`삭제를 완료하지 못했습니다. 연결을 확인한 뒤 다시 실행해 주세요. ${e.message}`);
-        } finally { setBusy(false); }
-      }}>
-        <Field label="삭제할 프로젝트 이름 확인" hint={`프로젝트 이름: ${p.name} (동일하게 입력)`}>
-          <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} disabled={busy} autoComplete="off" />
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (busy || confirmation !== p.name || !acknowledged) return;
+          setBusy(true);
+          setError("");
+          try {
+            await store.deleteProject(p.id, confirmation, setProgress);
+            nav("/admin", { replace: true });
+          } catch (e) {
+            setError(
+              `삭제를 완료하지 못했습니다. 연결을 확인한 뒤 다시 실행해 주세요. ${e.message}`,
+            );
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Field
+          label="삭제할 프로젝트 이름 확인"
+          hint={`프로젝트 이름: ${p.name} (동일하게 입력)`}
+        >
+          <input
+            value={confirmation}
+            onChange={(e) => setConfirmation(e.target.value)}
+            disabled={busy}
+            autoComplete="off"
+          />
         </Field>
-        <label className="check-label"><input type="checkbox" checked={acknowledged} disabled={busy} onChange={(e) => setAcknowledged(e.target.checked)} />자료가 영구 삭제되며 복구할 수 없음을 확인했습니다.</label>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            disabled={busy}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+          />
+          자료가 영구 삭제되며 복구할 수 없음을 확인했습니다.
+        </label>
         <ErrorBox error={error} />
-        <Button type="submit" className="btn danger" busy={busy} disabled={confirmation !== p.name || !acknowledged}>
+        <Button
+          type="submit"
+          className="btn danger"
+          busy={busy}
+          disabled={confirmation !== p.name || !acknowledged}
+        >
           {p.deleting ? "남은 자료 완전 삭제" : "프로젝트 영구 삭제"}
         </Button>
-        {busy && <p role="status">삭제 중… {progress}개 문서 처리. 완료될 때까지 화면을 닫지 마세요.</p>}
+        {busy && (
+          <p role="status">
+            삭제 중… {progress}개 문서 처리. 완료될 때까지 화면을 닫지 마세요.
+          </p>
+        )}
       </form>
     </details>
   );
