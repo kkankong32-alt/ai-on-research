@@ -26,6 +26,73 @@ import {
   instrumentsFor,
 } from "../src/data/instruments.js";
 import { codesFor } from "../src/data/codebook.js";
+import { draftKey, readDraft } from "../src/utils/drafts.js";
+test("pending drafts recover after account UID changes without crossing students or projects", () => {
+  const values = new Map();
+  const storage = {
+    get length() {
+      return values.size;
+    },
+    key: (i) => [...values.keys()][i],
+    getItem: (k) => values.get(k) || null,
+  };
+  const pending = { data: { question: "저장되지 않은 기록" }, baseRevision: 0 };
+  values.set("aion-draft:old-uid:p:S001_journal_1", JSON.stringify(pending));
+  assert.deepEqual(
+    readDraft(storage, "p", "S001_journal_1", "new-uid").data,
+    pending.data,
+  );
+  assert.equal(readDraft(storage, "p", "S002_journal_1", "new-uid"), null);
+  assert.equal(readDraft(storage, "q", "S001_journal_1", "new-uid"), null);
+  assert.equal(
+    readDraft(storage, "p", "S001_journal_1", "new-uid", true),
+    null,
+  );
+  const latest = {
+    ...pending,
+    data: { question: "계속 작성한 기록" },
+    baseRevision: 2,
+  };
+  values.set(draftKey("p", "S001_journal_1"), JSON.stringify(latest));
+  assert.equal(
+    readDraft(storage, "p", "S001_journal_1", "another-uid").baseRevision,
+    2,
+  );
+  assert.equal(values.size, 2);
+});
+test("malformed local drafts are preserved and valid recovery candidates remain usable", () => {
+  const values = new Map([
+    [draftKey("p", "S001_survey_PRE"), "{broken"],
+    [
+      "aion-draft:u:p:S001_survey_PRE",
+      JSON.stringify({ data: { raw: { A1: 3 } }, baseRevision: 1 }),
+    ],
+  ]);
+  const storage = {
+    get length() {
+      return values.size;
+    },
+    key: (i) => [...values.keys()][i],
+    getItem: (k) => values.get(k) || null,
+  };
+  assert.equal(readDraft(storage, "p", "S001_survey_PRE", "u").data.raw.A1, 3);
+  assert.equal(values.get(draftKey("p", "S001_survey_PRE")), "{broken");
+});
+test("oversized conversations are detected before both autosave and submission", () => {
+  const data = {
+    raw: "나: 질문",
+    turns: Array.from({ length: 501 }, () => ({ speaker: "student" })),
+  };
+  assert.match(validateRecord("prompt", data, false), /500/);
+  assert.match(validateRecord("prompt", data, true), /500/);
+  assert.ok(
+    validateRecord("prompt", { raw: "가".repeat(180001), turns: [] }, false),
+  );
+  assert.equal(
+    validateRecord("prompt", { raw: "", turns: [], note: "" }, false),
+    null,
+  );
+});
 test("legacy projects remain 28 items while revised labels keep stable identities", () => {
   assert.equal(instrumentVersion({}), INSTRUMENT_VERSION);
   assert.equal(questionIdsFor({}).length, 28);

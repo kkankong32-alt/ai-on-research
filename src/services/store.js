@@ -147,10 +147,7 @@ export async function studentLogin(code, loginMethod = "code") {
   return session;
 }
 export async function logout() {
-  for (let i = localStorage.length - 1; i >= 0; i--) {
-    const k = localStorage.key(i);
-    if (k?.startsWith("aion-draft:")) localStorage.removeItem(k);
-  }
+  // Unsynced drafts survive logout; the editor clears only successfully saved drafts.
   session = null;
   demo = false;
   if (auth?.currentUser) await signOut(auth);

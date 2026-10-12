@@ -9,6 +9,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import * as store from "../services/store.js";
+import { draftKey, readDraft } from "../utils/drafts.js";
+import { download } from "../utils/export.js";
 import {
   surveyFor,
   questionIdsFor,
@@ -213,10 +215,20 @@ function RecordEditor({ user, project, record, kind, unit }) {
   const SURVEY = surveyFor(version);
   const ids = questionIdsFor(version);
   const navigate = useNavigate(),
-    key = `aion-draft:${user.uid}:${project.id}:${recordKey(user.participant_id, kind, unit)}`;
+    key = draftKey(
+      project.id,
+      recordKey(user.participant_id, kind, unit),
+      store.isDemo(),
+    );
   const [recovered] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(key));
+      return readDraft(
+        localStorage,
+        project.id,
+        recordKey(user.participant_id, kind, unit),
+        user.uid,
+        store.isDemo(),
+      );
     } catch {}
     return null;
   });
@@ -310,6 +322,8 @@ function RecordEditor({ user, project, record, kind, unit }) {
         };
       setStatus("저장 중…");
       try {
+        const invalid = validateRecord(kind, payload, submit, version);
+        if (invalid) throw Error(invalid);
         revision.current = await store.saveRecord(
           project.id,
           user.participant_id,
@@ -322,6 +336,8 @@ function RecordEditor({ user, project, record, kind, unit }) {
         if (current.current === value) {
           dirty.current = false;
           localStorage.removeItem(key);
+          if (recovered?.sourceKey && recovered.sourceKey !== key)
+            localStorage.removeItem(recovered.sourceKey);
         } else persist(current.current);
         if (mounted.current)
           setStatus(store.isDemo() ? "미리보기에서만 저장됨" : "✓ 저장 완료");
@@ -329,7 +345,11 @@ function RecordEditor({ user, project, record, kind, unit }) {
       } catch (e) {
         if (/다른 기기/.test(e.message)) conflict.current = true;
         setStatus("저장하지 못했어요 · 기기에 임시 저장됨");
-        setError(e.message);
+        setError(
+          e.code === "permission-denied"
+            ? "서버에서 저장을 허용하지 않았어요. 작성 내용은 이 기기에 보관했습니다. 다시 저장해 보고, 계속되면 선생님께 알려 주세요."
+            : e.message,
+        );
         throw e;
       }
     };
@@ -374,7 +394,11 @@ function RecordEditor({ user, project, record, kind, unit }) {
       await flush(true);
       setDone(true);
     } catch (e) {
-      setError(e.message);
+      setError(
+        e.code === "permission-denied"
+          ? "서버에서 저장을 허용하지 않았어요. 작성 내용은 이 기기에 보관했습니다. 다시 저장해 보고, 계속되면 선생님께 알려 주세요."
+          : e.message,
+      );
     } finally {
       setBusy(false);
     }
@@ -444,17 +468,30 @@ function RecordEditor({ user, project, record, kind, unit }) {
         </p>
       </div>
       <ErrorBox error={error} />
-      {conflict.current && (
+      {error && !conflict.current && (
+        <Button
+          busy={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await flush();
+            } catch {
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          다시 저장하기
+        </Button>
+      )}
+      {(error || conflict.current) && (
         <Button
           onClick={() => {
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(
-              new Blob([JSON.stringify(data, null, 2)], {
-                type: "application/json",
-              }),
+            download(
+              "내-임시-초안.json",
+              JSON.stringify(current.current, null, 2),
+              "application/json",
             );
-            a.download = "내-임시-초안.json";
-            a.click();
           }}
         >
           현재 초안 내려받기

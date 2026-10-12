@@ -134,6 +134,13 @@ export function journalDraft(j) {
   };
 }
 export function validateRecord(kind, data, submit, source) {
+  if (
+    kind === "prompt" &&
+    ((data.raw?.length || 0) > 180000 ||
+      (data.turns?.length || 0) > 500 ||
+      new TextEncoder().encode(JSON.stringify(data)).length > 700000)
+  )
+    return "대화가 너무 길어요. 500개 발화 이내로 나누어 기록해 주세요. 현재 내용은 초안으로 보관됩니다.";
   if (!submit) return null;
   if (
     kind === "survey" &&
@@ -163,11 +170,6 @@ export function validateRecord(kind, data, submit, source) {
     (!data.raw?.trim() || !data.turns?.some((t) => t.speaker === "student"))
   )
     return "대화를 입력하고 내 말이 있는지 확인해 주세요.";
-  if (
-    kind === "prompt" &&
-    new TextEncoder().encode(JSON.stringify(data)).length > 700000
-  )
-    return "대화가 너무 길어요. 원문을 나누어 기록해 주세요.";
   return null;
 }
 export const DEFAULT_SESSION_QUESTIONS = {

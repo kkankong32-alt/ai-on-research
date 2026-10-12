@@ -8,6 +8,7 @@
     "build": "vite build",
     "test": "node --test tests/domain.test.js",
     "test:rules": "firebase emulators:exec --project demo-ai-on --only firestore \"node --test tests/rules.test.js\"",
+    "test:integration": "firebase emulators:exec --project demo-ai-on --only auth,firestore \"node tests/integration.mjs\"",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
