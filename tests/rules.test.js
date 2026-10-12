@@ -139,6 +139,122 @@ function record(s) {
     submittedAt: null,
   };
 }
+// Match the client's read-before-write transaction, including revision history.
+async function saveLikeClient(d, id, data, submit = false) {
+  const ref = doc(d, "projects", "p", "records", id);
+  return runTransaction(d, async (tx) => {
+    const old = (await tx.get(ref)).data();
+    const project = (await tx.get(doc(d, "projects", "p"))).data();
+    if (old)
+      tx.set(doc(ref, "revisions", String(old.revision)), {
+        before: old,
+        changedBy: "a",
+        changedAt: serverTimestamp(),
+        reason: "student-save",
+      });
+    tx.set(ref, {
+      ...data,
+      instrumentVersion:
+        old?.instrumentVersion ||
+        project.instrumentVersion ||
+        "ai-on-report-2026-v1",
+      revision: (old?.revision || 0) + 1,
+      createdAt: old?.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      status: submit ? "submitted" : "draft",
+      submittedAt: submit ? serverTimestamp() : null,
+    });
+  });
+}
+for (const version of ["ai-on-report-2026-v1", "ai-on-feedback-2026-v2"]) {
+  test(`first-save transactions, autosave, submission and reread for all record types: ${version}`, async () => {
+    await env.withSecurityRulesDisabled(async (c) =>
+      updateDoc(doc(c.firestore(), "projects", "p"), {
+        instrumentVersion: version,
+      }),
+    );
+    const d = anon("a");
+    const survey = { ...record("S001"), unit: "POST", phase: "POST" };
+    if (version.endsWith("v2")) {
+      delete survey.data.raw.A5;
+      delete survey.data.raw.D1;
+    }
+    const journal = {
+      ...record("S001"),
+      kind: "journal",
+      unit: "1",
+      session_id: 1,
+      phase: null,
+      data: {
+        question: "탐구 질문",
+        learned: "발견",
+        doubt: "",
+        check: "",
+        no_doubt: true,
+        struggle: "다시 시도",
+        challenge: 2,
+        mood: "헷갈림",
+        next: "다음 탐구",
+        auto: { valence: 0, verify: 0, meta: null },
+        questions: { question: "오늘의 탐구 질문" },
+      },
+    };
+    const prompt = {
+      ...record("S001"),
+      kind: "prompt",
+      unit: "1",
+      session_id: 1,
+      phase: null,
+      data: {
+        raw: "나: 왜 그럴까?",
+        turns: [
+          {
+            speaker: "student",
+            turn_no: 1,
+            raw_text: "왜 그럴까?",
+            auto_code: "Q-REASON",
+          },
+        ],
+        note: "",
+        rubricDraft: { rea: 2 },
+        questions: { prompt: "대화를 기록해요" },
+      },
+    };
+    for (const r of [survey, journal, prompt]) {
+      const id = `S001_${r.kind}_${r.unit}`;
+      await assertSucceeds(saveLikeClient(d, id, r));
+      await assertSucceeds(saveLikeClient(d, id, r));
+      await assertSucceeds(saveLikeClient(d, id, r, true));
+      const saved = (
+        await assertSucceeds(getDoc(doc(d, "projects", "p", "records", id)))
+      ).data();
+      assert.equal(saved.revision, 3);
+      assert.equal(saved.status, "submitted");
+      assert.equal(saved.instrumentVersion, version);
+      assert.deepEqual(saved.data, r.data);
+    }
+  });
+}
+test("absent record reads are restricted to the bound active student and project", async () => {
+  const d = anon("a");
+  await assertSucceeds(
+    getDoc(doc(d, "projects", "p", "records", "S001_journal_1")),
+  );
+  for (const id of ["S002_journal_1", "S0010_journal_1", "S001_unknown_1"])
+    await assertFails(getDoc(doc(d, "projects", "p", "records", id)));
+  await assertFails(
+    getDoc(doc(d, "projects", "q", "records", "S001_journal_1")),
+  );
+  await assertFails(
+    getDoc(doc(anon("unbound"), "projects", "p", "records", "S001_journal_1")),
+  );
+  await updateDoc(doc(admin(), "projects", "p", "participants", "S001"), {
+    active: false,
+  });
+  await assertFails(
+    getDoc(doc(d, "projects", "p", "records", "S001_journal_1")),
+  );
+});
 test("revised 26 item submission succeeds; retired or missing items and wrong versions fail", async () => {
   const v2 = "ai-on-feedback-2026-v2";
   await env.withSecurityRulesDisabled(async (c) =>
